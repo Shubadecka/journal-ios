@@ -1,5 +1,7 @@
 # Journal-iOS: On-device AI interaction with your personal journal.
 
+**Still a work in progress**
+
 This is a fork of of
 **[FastVLM: Efficient Vision Encoding for Vision Language Models](https://www.arxiv.org/abs/2412.13303). (CVPR 2025)**
 
