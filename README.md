@@ -75,7 +75,7 @@ the instructions in [`model_export`](model_export/).
 To run inference on Apple devices like iPhone, iPad or Mac, see [`app`](app/) subfolder for more details.
 
 ## Citation
-Forked from **(FastVLM)[https://github.com/apple/ml-fastvlm]** based on the following paper:
+Forked from **[FastVLM](https://github.com/apple/ml-fastvlm)** based on the following paper:
 ```
 @InProceedings{fastvlm2025,
   author = {Pavan Kumar Anasosalu Vasu, Fartash Faghri, Chun-Liang Li, Cem Koc, Nate True, Albert Antony, Gokul Santhanam, James Gabriel, Peter Grasch, Oncel Tuzel, Hadi Pouransari},
