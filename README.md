@@ -1,6 +1,6 @@
-# FastVLM: Efficient Vision Encoding for Vision Language Models
+# Journal-iOS: On-device AI interaction with your personal journal.
 
-This is the official repository of
+This is a fork of of
 **[FastVLM: Efficient Vision Encoding for Vision Language Models](https://www.arxiv.org/abs/2412.13303). (CVPR 2025)**
 
 [//]: # (![FastViTHD Performance]&#40;docs/acc_vs_latency_qwen-2.png&#41;)
@@ -75,7 +75,7 @@ the instructions in [`model_export`](model_export/).
 To run inference on Apple devices like iPhone, iPad or Mac, see [`app`](app/) subfolder for more details.
 
 ## Citation
-If you found this code useful, please cite the following paper:
+Forked from **(FastVLM)[https://github.com/apple/ml-fastvlm]** based on the following paper:
 ```
 @InProceedings{fastvlm2025,
   author = {Pavan Kumar Anasosalu Vasu, Fartash Faghri, Chun-Liang Li, Cem Koc, Nate True, Albert Antony, Gokul Santhanam, James Gabriel, Peter Grasch, Oncel Tuzel, Hadi Pouransari},
