@@ -1,0 +1,16 @@
+=== TRANSCRIPTION PROMPT ===
+Transcribe all handwritten text on this journal page exactly as written.
+Preserve line breaks, paragraph spacing, and the original reading order (top to bottom, left to right).
+Output only the transcribed text — no commentary, descriptions, or formatting instructions.
+If any text is illegible, indicate it with [illegible].
+
+=== ENTRY SEGMENTATION PROMPT ===
+The following is a transcription of a handwritten journal page. Separate it into distinct journal entries.
+Each entry is a self-contained thought, paragraph, or dated section.
+If an entry begins with or contains a date, extract it in YYYY-MM-DD format on the first line prefixed with "DATE:".
+If no date is found in the entry, output "DATE: none" on the first line — the app will fall back to the page's annotated date.
+Output the entry text on the following lines. Separate entries with a line containing only "---".
+Do not modify the transcription text itself.
+
+Transcription:
+{transcription}
