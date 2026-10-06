@@ -74,7 +74,7 @@ class TranscriptionQueue {
             let id = jobs[index].id
             let firstEntryDate = jobs[index].firstEntryDate
 
-            guard let image = CIImage(data: jobs[index].imageData) else {
+            guard let image = CIImage(data: jobs[index].imageData, options: [.applyOrientationProperty: true]) else {
                 setPhase(.failed("Could not read image data"), for: id)
                 continue
             }

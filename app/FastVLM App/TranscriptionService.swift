@@ -10,7 +10,7 @@ struct ParsedEntry {
     var needsReview: Bool = false
 }
 
-struct ParsedEntryRaw {
+struct ParsedEntryRaw: Codable {
     var entry: String
     var date: Date?
     var orderInPage: Int
@@ -28,7 +28,7 @@ class TranscriptionService {
     func loadPrompts() throws -> (transcription: String, segmentation: String) {
         guard let url = Bundle.main.url(forResource: "prompts", withExtension: "txt") else {
             throw NSError(
-                domain: "JounalApp", 
+                domain: "JournalApp", 
                 code: 1, 
                 userInfo: [NSLocalizedDescriptionKey: "prompts.txt not found in bundle"])
         }
@@ -42,7 +42,7 @@ class TranscriptionService {
         // The preamble [0] should be empty — if not, headers moved around.
         guard prompts.count == 3, prompts[0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw NSError(
-                domain: "JounalApp",
+                domain: "JournalApp",
                 code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "prompts.txt is invalid, expected two prompts, got \(prompts.count)"]
                 )
@@ -73,23 +73,36 @@ class TranscriptionService {
         images: [])
         let task = await model.generate(userInput)
         _ = await task.result
+
+        // If the output starts with "Failed:", throw an error
+        if model.output.starts(with: "Failed:") {
+            throw NSError(
+                domain: "JournalApp", 
+                code: 4, 
+                userInfo: [NSLocalizedDescriptionKey: model.output]
+                )
+        }
         return parseEntries(from: model.output, pageDate: pageDate)
     }
 
     // Parse entries from a page transcription
     func parseEntries(from output: String, pageDate: Date) throws -> [ParsedEntry] {
-        guard let jsonData = output.data(using: .utf8) else {
-            throw NSError(
-                domain: "JounalApp", 
-                code: 3, 
-                userInfo: [NSLocalizedDescriptionKey: "Failed to convert output to JSON data"]
-                )
-        }
+        guard let start = output.firstIndex(of: "["),
+            let end = output.lastIndex(of: "]"),
+            start < end else {
+                throw NSError(
+                    domain: "JournalApp", 
+                    code: 3, 
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to find JSON in output"]
+                    )
+            }
+        let jsonData = output[start..<end].data(using: .utf8)
 
         let decoder = JSONDecoder()
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = TimeZone(secondsFromGMT: 0)  // dates are date-only, UTC makes sense
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
             let dateString = try container.decode(String.self)
