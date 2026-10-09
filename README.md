@@ -1,80 +1,80 @@
-# Journal-iOS: On-device AI interaction with your personal journal.
+# Journal-iOS: On-device journal transcription and search
 
 **Still a work in progress**
 
-This is a fork of of
-**[FastVLM: Efficient Vision Encoding for Vision Language Models](https://www.arxiv.org/abs/2412.13303). (CVPR 2025)**
+An iOS/macOS app that transcribes handwritten journal pages on-device using a
+Vision-Language Model, then stores the transcriptions alongside the captured
+images so you can search your journal later — all privately, with no data
+leaving the device.
 
-[//]: # (![FastViTHD Performance]&#40;docs/acc_vs_latency_qwen-2.png&#41;)
+The transcription engine is
+**[FastVLM: Efficient Vision Encoding for Vision Language Models](https://www.arxiv.org/abs/2412.13303) (CVPR 2025)**,
+forked from [apple/ml-fastvlm](https://github.com/apple/ml-fastvlm). FastVLM's
+FastViTHD vision encoder is fast enough for on-device handwriting transcription;
+this project repurposes its demo app into a capture → transcribe → store →
+search workflow.
+
 <p align="center">
 <img src="docs/acc_vs_latency_qwen-2.png" alt="Accuracy vs latency figure." width="400"/>
 </p>
 
-### Highlights
-* We introduce FastViTHD, a novel hybrid vision encoder designed to output fewer tokens and significantly reduce encoding time for high-resolution images.  
-* Our smallest variant outperforms LLaVA-OneVision-0.5B with 85x faster Time-to-First-Token (TTFT) and 3.4x smaller vision encoder.
-* Our larger variants using Qwen2-7B LLM outperform recent works like Cambrian-1-8B while using a single image encoder with a 7.9x faster TTFT.
-* Demo iOS app to demonstrate the performance of our model on a mobile device.
+## Goal
 
-<table>
-<tr>
-    <td><img src="docs/fastvlm-counting.gif" alt="FastVLM - Counting"></td>
-    <td><img src="docs/fastvlm-handwriting.gif" alt="FastVLM - Handwriting"></td>
-    <td><img src="docs/fastvlm-emoji.gif" alt="FastVLM - Emoji"></td>
-</tr>
-</table>
+1. **Capture** — photograph one or more journal pages.
+2. **Transcribe** — the on-device VLM reads the handwriting and produces text.
+3. **Store** — persist the transcription and the source image together, with a
+   timestamp.
+4. **Search** — browse and full-text search past entries.
+
+## Status
+
+The upstream FastVLM demo app (live camera + free-form VLM chat) is intact under
+[`app/`](app/). The journal transcription/storage/search flow is **not yet
+implemented** — this README describes the intended product; see `AGENTS.md` for
+the current codebase structure.
 
 ## Getting Started
-We use LLaVA codebase to train FastVLM variants. In order to train or finetune your own variants, 
-please follow instructions provided in [LLaVA](https://github.com/haotian-liu/LLaVA) codebase. 
-We provide instructions for running inference with our models.   
 
-### Setup
+The app runs the FastVLM model on-device. You need a Mac (Apple Silicon) with
+Xcode to build it.
+
+### Download a model
+
+```bash
+chmod +x app/get_pretrained_mlx_model.sh
+app/get_pretrained_mlx_model.sh --model 0.5b --dest app/FastVLM/model
+```
+
+Model options: `0.5b` (fastest, FP16), `1.5b` (balanced, INT8), `7b` (most
+accurate, INT4). See [`app/README.md`](app/README.md) for details.
+
+### Build and run
+
+```bash
+open app/FastVLM.xcodeproj
+```
+
+Select the `FastVLM App` target and a destination (iOS 18.2+ device/simulator,
+or My Mac on macOS 15.2+), set your development team under Signing & Capabilities,
+then `⌘R`.
+
+### Python inference / training (optional)
+
+The `llava` Python package and `predict.py` are retained from the upstream fork
+for training, evaluation, and PyTorch inference.
+
 ```bash
 conda create -n fastvlm python=3.10
 conda activate fastvlm
 pip install -e .
-```
 
-### Model Zoo
-For detailed information on various evaluations, please refer to our [paper](https://www.arxiv.org/abs/2412.13303).
-
-| Model        | Stage |                                            Pytorch Checkpoint (url)                                             |
-|:-------------|:-----:|:---------------------------------------------------------------------------------------------------------------:|
-| FastVLM-0.5B |   2   | [fastvlm_0.5b_stage2](https://ml-site.cdn-apple.com/datasets/fastvlm/llava-fastvithd_0.5b_stage2.zip) |
-|              |   3   | [fastvlm_0.5b_stage3](https://ml-site.cdn-apple.com/datasets/fastvlm/llava-fastvithd_0.5b_stage3.zip) |
-| FastVLM-1.5B |   2   | [fastvlm_1.5b_stage2](https://ml-site.cdn-apple.com/datasets/fastvlm/llava-fastvithd_1.5b_stage2.zip) |
-|              |   3   | [fastvlm_1.5b_stage3](https://ml-site.cdn-apple.com/datasets/fastvlm/llava-fastvithd_1.5b_stage3.zip)  |
-| FastVLM-7B   |   2   | [fastvlm_7b_stage2](https://ml-site.cdn-apple.com/datasets/fastvlm/llava-fastvithd_7b_stage2.zip)  |
-|              |   3   | [fastvlm_7b_stage3](https://ml-site.cdn-apple.com/datasets/fastvlm/llava-fastvithd_7b_stage3.zip)  |
-
-To download all the pretrained checkpoints run the command below (note that this might take some time depending on your connection so might be good to grab ☕️ while you wait).
-
-```bash
-bash get_models.sh   # Files will be downloaded to `checkpoints` directory.
-```
-
-### Usage Example
-To run inference of PyTorch checkpoint, follow the instruction below
-```bash
 python predict.py --model-path /path/to/checkpoint-dir \
                   --image-file /path/to/image.png \
                   --prompt "Describe the image."
 ```
 
-### Inference on Apple Silicon
-To run inference on Apple Silicon, pytorch checkpoints have to be exported to format 
-suitable for running on Apple Silicon, detailed instructions and code can be found [`model_export`](model_export/) subfolder.
-Please see the README there for more details.
-
-For convenience, we provide 3 models that are in Apple Silicon compatible format: [fastvlm_0.5b_stage3](https://ml-site.cdn-apple.com/datasets/fastvlm/llava-fastvithd_0.5b_stage3_llm.fp16.zip), 
-[fastvlm_1.5b_stage3](https://ml-site.cdn-apple.com/datasets/fastvlm/llava-fastvithd_1.5b_stage3_llm.int8.zip), 
-[fastvlm_7b_stage3](https://ml-site.cdn-apple.com/datasets/fastvlm/llava-fastvithd_7b_stage3_llm.int4.zip). 
-We encourage developers to export the model of their choice with the appropriate quantization levels following 
-the instructions in [`model_export`](model_export/).
-
-### Inference on Apple Devices
-To run inference on Apple devices like iPhone, iPad or Mac, see [`app`](app/) subfolder for more details.
+PyTorch checkpoints: `bash get_models.sh` (downloads to `checkpoints/`).
+Export to Apple Silicon format: see [`model_export/`](model_export/).
 
 ## Citation
 Forked from **[FastVLM](https://github.com/apple/ml-fastvlm)** based on the following paper:
@@ -89,7 +89,7 @@ Forked from **[FastVLM](https://github.com/apple/ml-fastvlm)** based on the foll
 ```
 
 ## Acknowledgements
-Our codebase is built using multiple opensource contributions, please see [ACKNOWLEDGEMENTS](ACKNOWLEDGEMENTS) for more details. 
+Our codebase is built using multiple opensource contributions, please see [ACKNOWLEDGEMENTS](ACKNOWLEDGEMENTS) for more details.
 
 ## License
 Please check out the repository [LICENSE](LICENSE) before using the provided code and

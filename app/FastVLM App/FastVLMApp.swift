@@ -7,9 +7,16 @@ import SwiftUI
 
 @main
 struct FastVLMApp: App {
+    @State private var transcriptionQueue = TranscriptionQueue()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            EntryListView()
+                .environment(transcriptionQueue)
+                .safeAreaInset(edge: .top) {
+                    TranscriptionBanner()
+                }
         }
+        .modelContainer(for: [JournalPage.self, JournalEntry.self])
     }
 }

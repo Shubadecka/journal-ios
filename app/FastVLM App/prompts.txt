@@ -1,0 +1,31 @@
+=== TRANSCRIPTION PROMPT ===
+Transcribe all handwritten text on this journal page exactly as written.
+Preserve line breaks, paragraph spacing, and the original reading order (top to bottom, left to right).
+Output only the transcribed text — no commentary, descriptions, or formatting instructions.
+If any text is illegible, indicate it with [illegible]. Return only the transcribed page, nothing else.
+
+=== ENTRY SEGMENTATION PROMPT ===
+The following is a transcription of a handwritten journal page. Segment it into distinct journal entries with the date and position on the page of each.
+Each entry is a self-contained record of one or more days.
+Output the following JSON format:
+[
+    {
+        "date": "YYYY-MM-DD",
+        "entry": "<journal entry>",
+        "orderInPage": Int
+    },
+    {
+        "date": "YYYY-MM-DD",
+        "entry": "<journal entry>",
+        "orderInPage": Int
+    }
+]
+If an entry begins with or contains a date, extract it in YYYY-MM-DD format. 
+If no date is found in the entry, output "DATE: null" -- the app will populate any missing dates.
+The orderInPage entry should be 1-indexed.
+Do not modify the transcription text itself and do not output anything but the specified JSON.
+
+Transcription:
+{transcription}
+
+Segmented JSON:
