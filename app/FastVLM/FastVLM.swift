@@ -327,41 +327,61 @@ private enum Vision {
 ///
 /// This is meant to be used with ``FastVLM`` and is typically created by ``VLMModelFactory``.
 public class FastVLMProcessor: UserInputProcessor {
-
+    
     private let config: FastVLMProcessorConfiguration
     private let imageProcessingConfig: FastVLMPreProcessorConfiguration
     private let tokenizer: any Tokenizer
-
+    
     public init(_ config: FastVLMPreProcessorConfiguration, tokenizer: any Tokenizer) {
         self.config = FastVLMProcessorConfiguration()
         self.imageProcessingConfig = config
         self.tokenizer = tokenizer
     }
-
+    
     public func preprocess(image: CIImage, processing: UserInput.Processing?) throws -> (
         MLXArray, THW
     ) {
         // first apply the user requested resizing, etc. if any
         var image = MediaProcessingExtensions.apply(image, processing: processing)
-
+        
         // image_processing_clip.py
         let size = MediaProcessingExtensions.fitIn(
             image.extent.size, shortestEdge: imageProcessingConfig.size.shortestEdge)
         image = MediaProcessingExtensions.resampleBicubic(image, to: size)
-
+        
         image = MediaProcessingExtensions.centerCrop(
             image, size: imageProcessingConfig.cropSize.size)
-
+        
         image = MediaProcessing.normalize(
             image, mean: imageProcessingConfig.imageMeanTuple,
             std: imageProcessingConfig.imageStdTuple)
-
+        
         let array = MediaProcessingExtensions.asPlanarMLXArray(image)
         return (array, .init(0, array.dim(2), array.dim(3)))
     }
+    
+    private func asMessages(_ prompt: UserInput.Prompt) -> [[String: String]] {
+        switch prompt {
+        case .text(let text):
+            return [["role": "user", "content": text]]
+        case .messages(let dicts):
+            var messages: [[String: String]] = []
+            for m in dicts {
+                guard let role = m["role"] as? String,
+                      let content = m["content"] as? String
+                        else { continue }
+                messages.append(["role": role, "content": content])
+            }
+            return messages
+                
+        case .chat(let chatMessages):
+            return chatMessages.map { ["role": $0.role.rawValue, "content": $0.content] }
+            }
+        }
+    }
 
     public func prepare(prompt: UserInput.Prompt, imageTHW: THW?) -> String {
-        var messages = prompt.asMessages()
+        var messages = asMessages(prompt)
         if messages[0]["role"] != "system" {
             messages.insert(["role": "system", "content": "You are a helpful assistant."], at: 0)
         }
@@ -411,7 +431,7 @@ public class FastVLMProcessor: UserInputProcessor {
 
         let (pixels, thw) = try preprocess(
             image: input.images[0].asCIImage(), processing: input.processing)
-        let image = LMInput.ProcessedImage(pixels: pixels, imageGridThw: [thw])
+        let image = LMInput.ProcessedImage(pixels: pixels, frames: [thw])
 
         let prompt = prepare(prompt: input.prompt, imageTHW: thw)
         let promptTokens = tokenizer.encode(text: prompt)
@@ -537,7 +557,7 @@ public class FastVLM: Module, VLMModel, KVCacheDimensionProvider {
     public func prepare(_ input: LMInput, cache: [any KVCache], windowSize: Int?) throws
         -> PrepareResult
     {
-        let gridThw = input.image?.imageGridThw
+        let gridThw = input.image?.frames
 
         let dtype = DType.float32
         let pixels = input.image?.pixels.asType(dtype)
