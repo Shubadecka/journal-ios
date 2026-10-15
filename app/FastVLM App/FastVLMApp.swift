@@ -12,11 +12,11 @@ struct FastVLMApp: App {
     var body: some Scene {
         WindowGroup {
             EntryListView()
-                .environment(transcriptionQueue)
                 .safeAreaInset(edge: .top) {
                     TranscriptionBanner()
                 }
         }
         .modelContainer(for: [JournalPage.self, JournalEntry.self])
+        .environment(transcriptionQueue)
     }
 }

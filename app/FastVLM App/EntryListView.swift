@@ -33,6 +33,7 @@ struct EntryListView: View {
             }
             .searchable(text: $searchText)
             .navigationTitle("Journal Entries")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     NavigationLink {
