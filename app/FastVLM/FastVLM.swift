@@ -103,7 +103,7 @@ private enum Language {
         }
 
         public func callAsFunction(
-            _ x: MLXArray, mask: MLXArray? = nil, cache: KVCache?
+            _ x: MLXArray, mask: MLXFast.ScaledDotProductAttentionMaskMode, cache: KVCache?
         ) -> MLXArray {
             let (B, L) = (x.dim(0), x.dim(1))
 
@@ -117,7 +117,6 @@ private enum Language {
             values = values.reshaped(B, L, kvHeads, headDim).transposed(0, 2, 1, 3)
 
             let offset = cache?.offset ?? 0
-            let mask = mask?[0..., 0 ..< keys.dim(-2)]
 
             queries = rotaryEmbedding(queries, offset: offset)
             keys = rotaryEmbedding(keys, offset: offset)
@@ -171,7 +170,7 @@ private enum Language {
         }
 
         public func callAsFunction(
-            _ x: MLXArray, mask: MLXArray? = nil, cache: KVCache?
+            _ x: MLXArray, mask: MLXFast.ScaledDotProductAttentionMaskMode, cache: KVCache?
         ) -> MLXArray {
             var r = attention(inputLayerNorm(x), mask: mask, cache: cache)
             let h = x + r
@@ -378,7 +377,6 @@ public class FastVLMProcessor: UserInputProcessor {
             return chatMessages.map { ["role": $0.role.rawValue, "content": $0.content] }
             }
         }
-    }
 
     public func prepare(prompt: UserInput.Prompt, imageTHW: THW?) -> String {
         var messages = asMessages(prompt)
@@ -442,7 +440,6 @@ public class FastVLMProcessor: UserInputProcessor {
     }
 
 }
-
 // MARK: - Model
 
 private class FastVLMMultiModalProjector: Module, UnaryLayer {

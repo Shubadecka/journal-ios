@@ -1,5 +1,6 @@
 import Foundation
 import CoreImage
+import MLXLMCommon
 
 struct ParsedEntry {
     var entry: String
@@ -16,6 +17,7 @@ struct ParsedEntryRaw: Codable {
     var orderInPage: Int
 }
 
+@MainActor
 @Observable
 class TranscriptionService {
     private let model: FastVLMModel
@@ -36,18 +38,17 @@ class TranscriptionService {
         // Splitting on BOTH headers yields three components:
         // [0] = anything before the first header (should be empty),
         // [1] = transcription prompt, [2] = segmentation prompt.
-        let prompts = contents
-        .components(separatedBy: ["=== TRANSCRIPTION PROMPT ===", "=== ENTRY SEGMENTATION PROMPT ==="])
-
-        // The preamble [0] should be empty — if not, headers moved around.
-        guard prompts.count == 3, prompts[0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw NSError(
-                domain: "JournalApp",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "prompts.txt is invalid, expected two prompts, got \(prompts.count)"]
-                )
-            }
-        return (transcription: prompts[1], segmentation: prompts[2])
+        let header1 = "=== TRANSCRIPTION PROMPT ==="
+        let header2 = "=== ENTRY SEGMENTATION PROMPT ==="
+        guard let r1 = contents.firstRange(of: header1),
+              let r2 = contents.firstRange(of: header2),
+              r1.upperBound <= r2.lowerBound else {
+            throw NSError(domain: "JournalApp", code: 1, userInfo: [NSLocalizedDescriptionKey: "prompts.txt not separating cleanly"])
+        }
+        let _ = contents[..<r1.lowerBound]
+        let transcriptionPrompt = String(contents[r1.upperBound..<r2.lowerBound])
+        let segmentationPrompt = String(contents[r2.upperBound...])
+        return (transcription: transcriptionPrompt, segmentation: segmentationPrompt)
     }
 
     // Transcribe a page image
@@ -82,7 +83,7 @@ class TranscriptionService {
                 userInfo: [NSLocalizedDescriptionKey: model.output]
                 )
         }
-        return parseEntries(from: model.output, pageDate: pageDate)
+        return try parseEntries(from: model.output, pageDate: pageDate)
     }
 
     // Parse entries from a page transcription
@@ -97,6 +98,9 @@ class TranscriptionService {
                     )
             }
         let jsonData = output[start..<end].data(using: .utf8)
+        guard let jsonData = jsonData else {
+            throw NSError(domain: "JournalApp", code: 1, userInfo: [NSLocalizedDescriptionKey: "JSON Decoding failed"])
+        }
 
         let decoder = JSONDecoder()
         let formatter = DateFormatter()

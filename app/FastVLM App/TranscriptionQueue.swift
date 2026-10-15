@@ -2,7 +2,7 @@ import Foundation
 import CoreImage
 import SwiftData
 
-enum JobPhase {
+enum JobPhase: Equatable {
     case queued, transcribing, segmenting
     case done
     case failed(String)

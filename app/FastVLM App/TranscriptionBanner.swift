@@ -19,6 +19,15 @@ struct TranscriptionBanner: View {
             .background(.regularMaterial)
         }
     }
+    
+    private var statusMessage: String {
+        let pending = queue.jobs.filter { !$0.isDone && !$0.isFailed }.count
+        let failed = queue.jobs.filter { $0.isFailed }.count
+        var parts: [String] = []
+        if pending > 0 { parts.append("\(pending) queued") }
+        if failed > 0 { parts.append("\(failed) failed") }
+        return parts.isEmpty ? "Done" : parts.joined(separator: " · ")
+    }
 
     private var header: some View {
         Button {
@@ -31,18 +40,10 @@ struct TranscriptionBanner: View {
                     let position = queue.jobs.prefix(while: { $0.id != active.id }).count + 1
                     Text("Transcribing page \(position) of \(queue.jobs.count)…")
                 } else {
-                    let pending = queue.jobs.filter { !$0.isDone && !$0.isFailed }.count
                     let failed = queue.jobs.filter { $0.isFailed }.count
-                    var parts: [String] = []
-                    if pending > 0 { parts.append("\(pending) queued") }
-                    if failed > 0 { parts.append("\(failed) failed") }
-                    if parts.isEmpty {
-                        Image(systemName: "checkmark.circle")
-                        Text("Done")
-                    } else {
-                        Image(systemName: failed > 0 ? "exclamationmark.triangle" : "clock")
-                        Text(parts.joined(separator: " · "))
-                    }
+                    Image(systemName: failed > 0 ? "exclamationmark.triangle" : (statusMessage == "Done"
+                    ? "checkmark.circle" : "clock"))
+                        Text(statusMessage)
                 }
                 Spacer()
                 Image(systemName: expanded ? "chevron.down" : "chevron.up")
