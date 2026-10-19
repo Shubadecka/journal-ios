@@ -1,50 +1,28 @@
 import SwiftUI
-import PhotosUI
-import SwiftData
+import UIKit
 
 struct CaptureView: View {
-    @Environment(\.modelContext) private var modelContext // DB Session
-    @Environment(\.dismiss) private var dismiss // Close this screen
-    @Environment(TranscriptionQueue.self) private var queue // Background transcription queue
+    @Environment(\.dismiss) private var dismiss
+    @State private var pageImages: [Data] = []
+    @State private var showCamera = false
 
-    @State private var capturedImage: Data?
-    @State private var firstEntryDate = Date()
-    @State private var photosPickerItem: PhotosPickerItem?
+    // UIImagePickerController needs real camera hardware — false in the
+    // simulator and on visionOS, where only the library-import path exists.
+    private var cameraAvailable: Bool {
+        UIImagePickerController.isSourceTypeAvailable(.camera)
+    }
 
     var body: some View {
         VStack(spacing: 20) {
-            if let imageData = capturedImage,
-                let uiImage = UIImage(data: imageData) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 400)
-            } else {
-                Rectangle()
-                    .fill(.secondary)
-                    .frame(height: 400)
-                    .overlay(Text("Capture or import a photo"))
-            }
+            TranscribeForm(pageImages: $pageImages)
 
-            DatePicker("Date of first entry", selection:
-            $firstEntryDate, displayedComponents: .date)
-
-            PhotosPicker(selection: $photosPickerItem,
-            matching: .images) {
-                Label("Import from Photos", systemImage: "photo.on.rectangle")
+            if cameraAvailable {
+                Button {
+                    showCamera = true
+                } label: {
+                    Label("Take photo(s)", systemImage: "camera")
+                }
             }
-
-            Button("Transcribe") {
-                // Enqueue for background transcription and close immediately —
-                // the user is never blocked waiting on the model.
-                guard let imageData = capturedImage else { return }
-                queue.enqueue(
-                    imageData: imageData,
-                    firstEntryDate: firstEntryDate,
-                    modelContext: modelContext)
-                dismiss()
-            }
-            .disabled(capturedImage == nil)
         }
         .navigationTitle("New Page")
         .toolbar {
@@ -52,18 +30,11 @@ struct CaptureView: View {
                 Button("Cancel") { dismiss() }
             }
         }
-        // Load the picked photo's bytes into capturedImage. loadTransferable
-        // is async, so we get a Task-style handler; Task { @MainActor } hops
-        // the result back onto the main actor where @State can be mutated.
-        .onChange(of: photosPickerItem) {
-            Task { @MainActor in
-                guard let photosPickerItem else { return }
-                do {
-                    capturedImage = try await photosPickerItem.loadTransferable(
-                        type: Data.self)
-                } catch {
-                    capturedImage = nil
-                }
+        // Each confirmed capture APPENDS a page photo, so the user can
+        // photograph several pages before transcribing them all at once.
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker { imageData in
+                pageImages.append(imageData)
             }
         }
     }

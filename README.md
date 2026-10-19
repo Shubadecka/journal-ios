@@ -2,10 +2,12 @@
 
 **Still a work in progress**
 
-An iOS/macOS app that transcribes handwritten journal pages on-device using a
-Vision-Language Model, then stores the transcriptions alongside the captured
-images so you can search your journal later — all privately, with no data
-leaving the device.
+An iOS/macOS app that turns photos of handwritten journal pages into searchable
+text. Photograph or import one or more pages, and an on-device Vision-Language
+Model transcribes the handwriting; a second model pass splits each transcription
+into individual dated entries. Entries and their source images are stored
+locally with SwiftData, so you can browse and search your journal later — all
+privately, with no data leaving the device.
 
 The transcription engine is
 **[FastVLM: Efficient Vision Encoding for Vision Language Models](https://www.arxiv.org/abs/2412.13303) (CVPR 2025)**,
@@ -18,20 +20,28 @@ search workflow.
 <img src="docs/acc_vs_latency_qwen-2.png" alt="Accuracy vs latency figure." width="400"/>
 </p>
 
-## Goal
+## How it works
 
-1. **Capture** — photograph one or more journal pages.
-2. **Transcribe** — the on-device VLM reads the handwriting and produces text.
-3. **Store** — persist the transcription and the source image together, with a
-   timestamp.
-4. **Search** — browse and full-text search past entries.
+1. **Capture** — photograph one or more journal pages, or import them from
+   Photos. Each batch is queued and transcribed in the background while a
+   banner shows progress.
+2. **Transcribe** — the on-device VLM reads each page verbatim; unreadable
+   words are marked `[illegible]`.
+3. **Segment** — a second text-only model pass splits the transcription into
+   individual entries and assigns each a date (dates may be inferred from the
+   page and flagged for review).
+4. **Store** — entries are saved together with the source image in a local
+   SwiftData store.
+5. **Search** — browse entries newest-first and full-text search past entries;
+   entries with inferred dates are marked with a red border for review.
 
 ## Status
 
-The upstream FastVLM demo app (live camera + free-form VLM chat) is intact under
-[`app/`](app/). The journal transcription/storage/search flow is **not yet
-implemented** — this README describes the intended product; see `AGENTS.md` for
-the current codebase structure.
+The journal flow is implemented end-to-end: multi-page capture/import, on-device
+transcription and segmentation, a serial transcription queue with progress
+banner, and browse/search over saved entries. Remaining work: a page view with
+re-transcription and polish — see [`docs/plan.md`](docs/plan.md) for step status
+and [`AGENTS.md`](AGENTS.md) for the codebase structure.
 
 ## Getting Started
 

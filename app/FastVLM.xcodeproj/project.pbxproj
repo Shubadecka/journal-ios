@@ -71,13 +71,6 @@
 			);
 			target = 019A3E092D78E6A00055F93B /* FastVLM App */;
 		};
-		C35372B92D08C32D00474D34 /* Exceptions for "Video" folder in "Video" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			publicHeaders = (
-				Video.h,
-			);
-			target = C35372AD2D08C32D00474D34 /* Video */;
-		};
 		C3ED54BB2D791BEA005E20B3 /* Exceptions for "FastVLM" folder in "FastVLM" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			publicHeaders = (
@@ -96,17 +89,14 @@
 			path = "FastVLM App";
 			sourceTree = "<group>";
 		};
+		15BAB6D13080538000C358D6 /* Camera */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Camera;
+			sourceTree = "<group>";
+		};
 		C32B4A802DA4805400EF663D /* Configuration */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Configuration;
-			sourceTree = "<group>";
-		};
-		C35372AF2D08C32D00474D34 /* Video */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				C35372B92D08C32D00474D34 /* Exceptions for "Video" folder in "Video" target */,
-			);
-			path = Video;
 			sourceTree = "<group>";
 		};
 		C39BB3E72D79082A005DB8FB /* FastVLM */ = {
@@ -159,10 +149,10 @@
 		C35EDB632D07699400757E80 = {
 			isa = PBXGroup;
 			children = (
+				15BAB6D13080538000C358D6 /* Camera */,
 				12FFAF3E2DC93583009C4EFA /* README.md */,
 				12FFAF3D2DC93583009C4EFA /* get_pretrained_mlx_model.sh */,
 				C32B4A802DA4805400EF663D /* Configuration */,
-				C35372AF2D08C32D00474D34 /* Video */,
 				019A3E0B2D78E6A00055F93B /* FastVLM App */,
 				C39BB3E72D79082A005DB8FB /* FastVLM */,
 				C35EDB7F2D076C3C00757E80 /* Frameworks */,
@@ -224,6 +214,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				019A3E0B2D78E6A00055F93B /* FastVLM App */,
+				15BAB6D13080538000C358D6 /* Camera */,
 			);
 			name = "FastVLM App";
 			packageProductDependencies = (
@@ -248,9 +239,6 @@
 			buildRules = (
 			);
 			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				C35372AF2D08C32D00474D34 /* Video */,
 			);
 			name = Video;
 			packageProductDependencies = (
