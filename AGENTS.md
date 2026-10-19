@@ -1,190 +1,176 @@
 # Repository Guidelines
 
-> AGENTS.md — guidance for AI assistants working in this codebase.
-
 ## Project Overview
 
-**journal-ios** is a fork of Apple's **FastVLM** (*FastVLM: Efficient Vision Encoding for Vision Language Models*, CVPR 2025). It packages three things in one repo:
+On-device handwritten-journal app: photograph/import paper journal pages →
+transcribe the handwriting with a vision-language model → segment the
+transcription into dated entries → persist and search them. All inference is
+on-device; there is no backend.
 
-1. A **PyTorch training/inference** stack (the `llava` Python package, based on the LLaVA codebase) for FastViTHD vision encoders + LLMs (Qwen2/Llama/Mistral/MPT).
-2. **Apple Silicon export** tooling (`model_export/`) that converts PyTorch checkpoints into CoreML vision encoders (`.mlpackage`) and MLX-compatible LLM weights via a patched `mlx-vlm`.
-3. A **native iOS/macOS/visionOS Swift app** (`app/`) that runs the exported model on-device with live camera input.
+The model is **FastVLM** (CVPR 2025), forked from
+[apple/ml-fastvlm](https://github.com/apple/ml-fastvlm): a Qwen2 LLM on MLX
+plus a FastViT-HD vision tower on Core ML. The repo has two halves:
 
-The fork's stated goal is on-device AI interaction with a personal journal. It is a **work in progress** with no test suite and no CI — verification is manual.
+- **Swift app** (`app/`) — the journal product. This is where active work is.
+- **Python tooling** (`llava/`, `predict.py`, `model_export/`) — vendored
+  upstream LLaVA code for training, PyTorch eval, and model export. Treat as
+  third-party; rarely needs changes.
 
 ## Architecture & Data Flow
 
-### Python model stack (`llava/`)
+Two LLM calls per page, then SwiftData persistence:
 
-FastVLM follows LLaVA's modular mixin design. A model is a transformer LLM decorated by a `LlavaMetaModel` / `LlavaMetaForCausalLM` mixin (`llava/model/llava_arch.py`) that attaches:
+1. Capture: `EntryListView` → `ImportView` (PhotosPicker) or `CaptureView`
+   (`CameraPicker` wrapper) collect `[Data]` page images → `TranscribeForm`
+   enqueues one job per image and dismisses.
+2. `TranscriptionQueue.drain` (serial loop) decodes each image.
+3. `TranscriptionService.transcribePage` — VLM call 1: image → verbatim
+   transcription (prompt from `prompts.txt`).
+4. `segmentPageTranscription` — VLM call 2: text-only, `{transcription}` filled
+   into the segmentation prompt → JSON array of `{date, entry, orderInPage}`.
+5. `parseEntries` (guarded bracket-slice + `JSONDecoder`, `yyyy-MM-dd` UTC) and
+   `inferDates` (fills missing dates, sets `needsReview`).
+6. Auto-save `JournalPage` + `JournalEntry` into the passed `ModelContext`;
+   `EntryListView` renders them via `@Query`, search via `.searchable`.
+   `TranscriptionBanner` (`.safeAreaInset`) shows queue progress.
 
-- a **vision tower** (`llava/model/multimodal_encoder/`): `clip_encoder.py`, `mobileclip_encoder.py`, or FastViTHD via the builder; MobileCLIP config in `mobileclip/configs/`.
-- a **multimodal projector** (`llava/model/multimodal_projector/builder.py`): an MLP that maps vision tokens into the LLM embedding space.
-- a **language model** (`llava/model/language_model/`): `llava_llama.py`, `llava_mistral.py`, `llava_mpt.py`, `llava_qwen.py`.
+Key types (all in `app/FastVLM App/`):
 
-**Inference data flow:** `Image → image_processor (mm_utils.process_images) → vision tower → projector → LLM input embeddings → text generation`. Conversation templating (`llava/conversation.py`, `conv_templates`) and image-token expansion (`llava/mm_utils.tokenizer_image_token`) sit between the raw prompt and the model. Special tokens (`IMAGE_TOKEN_INDEX`, `DEFAULT_IMAGE_TOKEN`) are centralized in `llava/constants.py`.
+| Type | Role |
+|---|---|
+| `JournalApp` (`FastVLMApp.swift`) | `@main`; owns `TranscriptionQueue`, injects `.environment`, installs `.modelContainer` |
+| `TranscriptionQueue` | `@MainActor @Observable` serial job queue (`TranscriptionJob`/`JobPhase`). **In-memory only — app kill loses queued work.** |
+| `TranscriptionService` | Prompt loading, the two LLM passes, JSON parsing, date inference |
+| `FastVLMModel` | MLX generation wrapper (`VLMModelFactory.shared.loadContainer`, `generate` → `Task<Void, Never>`) |
+| `JournalPage` / `JournalEntry` (`JournalModels.swift`) | SwiftData `@Model`s; entries many-to-many `pages` (cross-page entries), `needsReview` flag |
 
-Models are assembled by `llava/model/builder.py::load_pretrained_model`, which resolves the model name from the checkpoint path, picks the right LLM class, and wires in the vision tower + projector. **Models must follow LLaVA naming/structure conventions to be recognized by the builder.**
+`app/FastVLM/FastVLM.swift` is the vendored Apple model port (Qwen2 language
+model in MLX, `fastvithd` CoreML vision tower behind `NSLock`,
+`FastVLMProcessor` image preprocessing) registered as an MLX `VLMModel`. Leave
+it alone unless the model itself changes.
 
-### Serving (hub-and-spoke)
-
-`llava/serve/` implements an HTTP worker-controller pattern:
-- `controller.py` — FastAPI registry/dispatcher.
-- `model_worker.py` — loads a model, handles inference requests, sends heartbeats.
-- `register_worker.py`, `sglang_worker.py` — alternate worker registration.
-- `gradio_web_server.py` — Gradio UI front-end.
-- `cli.py` — conversational CLI client.
-
-Workers communicate over HTTP; standard flags include `--controller`, `--model-path`, and quantization flags (`--load-4bit`, `--load-8bit`).
-
-### Apple Silicon export (`model_export/` + root scripts)
-
-PyTorch → Apple format bridge:
-- `model_export/export_vision_encoder.py` (and root `export_vision_encoder.py`) load the LLaVA config, inject the `<image>` special token, and export the **FastViT-HD vision encoder** to a CoreML `.mlpackage` via `coremltools`.
-- `model_export/fastvlm_mlx-vlm.patch` patches a vendored `mlx-vlm` to add custom `fastvlm.py` / `language.py` model+projector classes so the LLM half converts to MLX and runs natively. Apply it to a local `mlx-vlm` checkout (see `model_export/README.md`).
-
-### iOS app (`app/`)
-
-SwiftUI app, `@Observable` + `@MainActor` for state/UI safety:
-- `app/FastVLM App/FastVLMApp.swift` — entry point.
-- `app/FastVLM App/ContentView.swift` — camera preview + interaction UI.
-- `app/FastVLM App/FastVLMModel.swift` — loads the MLX model, runs async inference, streams tokens via `Task` blocks.
-- `app/Video/CameraController.swift` — AVCapture camera access; frames flow `CameraController → VideoFrameView → model inference`.
-- `app/FastVLM/` + `app/Video/Video.h` — Objective-C bridging headers (`FastVLM.h`, `Video.h`) and `MediaProcessingExtensions.swift` (pixel-buffer handling).
-
-Models are fetched by `app/get_pretrained_mlx_model.sh` into a local directory and loaded into GPU memory at runtime. Token streaming is non-blocking/async.
+Authoritative design doc: `docs/plan.md` (data model rationale, pipeline, screen
+map, decisions). Its status table marks implementation steps 1–6 done; 7
+(PageView + re-transcription) and 8 (polish) are open. The README "Status"
+section is stale — the journal flow is largely implemented.
 
 ## Key Directories
 
-| Path | Purpose |
-|---|---|
-| `llava/` | Python `llava` package: model arch, training, serving, utils. |
-| `llava/model/` | Model assembly: `builder.py`, `llava_arch.py` mixin, vision encoder, projector, language-model variants. |
-| `llava/model/multimodal_encoder/` | CLIP / MobileCLIP / FastViTHD vision towers. |
-| `llava/model/language_model/` | Per-LLM-family LLaVA model classes (llama/mistral/mpt/qwen). |
-| `llava/train/` | Training scripts + attention monkey-patches (FlashAttention, xFormers). |
-| `llava/serve/` | Controller + workers + Gradio server + CLI. |
-| `model_export/` | PyTorch → CoreML/MLX export scripts, `fastvlm_mlx-vlm.patch`, README. |
-| `app/` | iOS/macOS/visionOS Swift app. |
-| `app/FastVLM App/` | SwiftUI app, model loader, entitlements, Info.plist. |
-| `app/Video/`, `app/FastVLM/` | Camera + media processing / Obj-C bridging. |
-| `app/Configuration/` | `Build.xcconfig`. |
-| `docs/` | GIFs/PNGs for the README (no written docs). |
-| `checkpoints/` | (gitignored) PyTorch checkpoints from `get_models.sh`. |
+- `app/FastVLM App/` — SwiftUI app: views, queue/service, SwiftData models,
+  `prompts.txt`, entitlements. **All product code lives here.**
+- `app/FastVLM/` — vendored FastVLM framework source; `app/FastVLM/model/`
+  (gitignored) holds downloaded MLX weights + `fastvithd.mlpackage`, bundled as
+  framework resources via a filesystem-synchronized folder.
+- `app/Camera/` — `CameraPicker` (`UIImagePickerController` → JPEG `Data`).
+- `app/Configuration/` — `Build.xcconfig` (vestigial, one unused variable).
+- `llava/` — vendored LLaVA: `model/` (arch, Qwen2 backend), `train/`, `serve/`.
+- `model_export/` — vision-encoder export to Core ML + mlx-vlm patch; see its
+  README for the full weights pipeline.
+- `docs/` — living `plan.md` and `bugs.md` (see Testing & QA).
 
 ## Development Commands
 
-### Python environment (training/inference/export)
+Model first — the build fails without it (weights are bundled resources):
 
 ```bash
-# Create the conda env recommended by README (python=3.10, despite pyproject >=3.8)
-conda create -n fastvlm python=3.10
-conda activate fastvlm
-pip install -e .                       # installs the `llava` package (setuptools backend)
-
-# Optional extras
-pip install -e ".[train]"             # deepspeed==0.13.1, ninja, wandb
-pip install -e ".[build]"              # build, twine (for PyPI publishing)
+chmod +x app/get_pretrained_mlx_model.sh
+app/get_pretrained_mlx_model.sh --model 0.5b --dest app/FastVLM/model
+# 0.5b = FP16 (fastest) | 1.5b = INT8 | 7b = INT4
 ```
 
-### Run inference (PyTorch checkpoint, Apple Silicon MPS)
+Build/run (Mac with Apple Silicon + Xcode):
 
 ```bash
-python predict.py --model-path /path/to/checkpoint-dir \
-                  --image-file /path/to/image.png \
-                  --prompt "Describe the image."
+open app/FastVLM.xcodeproj   # scheme "FastVLM App", ⌘R
+# CLI equivalent:
+xcodebuild -project app/FastVLM.xcodeproj -scheme "FastVLM App" build
 ```
 
-`predict.py` flags (see source — no `--help` overrides defaults that matter):
+Destination: iOS 18.2+ device/simulator or My Mac (macOS 15.2+); set your
+development team under Signing & Capabilities on first build.
 
-| Flag | Default | Notes |
-|---|---|---|
-| `--model-path` | `./llava-v1.5-13b` | Checkpoint dir. |
-| `--model-base` | `None` | Base model for delta merges. |
-| `--image-file` | `None` | Image path. |
-| `--prompt` | `"Describe the image."` | Query text. |
-| `--conv-mode` | `qwen_2` | `conv_templates` key; matches Qwen2 LLMs. |
-| `--temperature` | `0.2` | `0` ⇒ greedy (`do_sample=False`). |
-| `--top_p` | `None` | |
-| `--num-beams` | `1` | |
-
-> `predict.py` **hardcodes `device="mps"`** and `max_new_tokens=256`. It is Apple-Silicon-only as written.
-
-### Download model checkpoints
+Python (optional — training/eval/export only, not needed for app work):
 
 ```bash
-bash get_models.sh          # PyTorch checkpoints → checkpoints/ (0.5B/1.5B/7B × stage2/3)
-# Inside app/: MLX-format LLM weights for the iOS app
-bash app/get_pretrained_mlx_model.sh
+conda create -n fastvlm python=3.10 && conda activate fastvlm
+pip install -e .
+bash get_models.sh           # PyTorch checkpoints → checkpoints/
+python predict.py --model-path checkpoints/<ckpt> --image-file img.png --prompt "..."
 ```
 
-### Export to Apple Silicon format
-
-Follow `model_export/README.md`: run `export_vision_encoder.py` for the CoreML vision encoder, then apply `fastvlm_mlx-vlm.patch` to a vendored `mlx-vlm` and convert the LLM half (see `--only-llm` helper in the patch).
-
-### iOS app build
-
-Open `app/FastVLM.xcodeproj` in Xcode. **Deployment targets: iOS 18 / macOS 15 / visionOS 2.** Set your development team in the project; bundle IDs are derived from `DEVELOPMENT_TEAM` via `app/Configuration/Build.xcconfig` (`DISAMBIGUATOR=${DEVELOPMENT_TEAM}` — sample-project convention only).
+Model export (PyTorch → Core ML + MLX): `model_export/README.md`
+(`export_vision_encoder.py`, patched mlx-vlm pinned at commit `1884b55`).
 
 ## Code Conventions & Common Patterns
 
-- **Model composition via mixins.** `LlavaMetaModel` / `LlavaMetaForCausalLM` (`llava/model/llava_arch.py`) is the single place vision-tower + projector initialization lives; each `llava/model/language_model/llava_<llm>.py` composes it with a HF LLM. Add a new LLM family by adding a new `llava_<family>.py` following the existing four.
-- **Builder is the registry.** `llava/model/builder.py::load_pretrained_model` dispatches on model name/path. New model classes must be importable and named per LLaVA conventions or the builder will not find them.
-- **Constants are centralized** in `llava/constants.py` (`IMAGE_TOKEN_INDEX`, `DEFAULT_IMAGE_TOKEN`, `DEFAULT_IM_START_TOKEN`, `DEFAULT_IM_END_TOKEN`). Do not hardcode image token strings elsewhere.
-- **Conversation templates** keyed by string in `llava/conversation.py` (`conv_templates`). `predict.py` defaults to `qwen_2`; match the conv-mode to the LLM family.
-- **Monkey-patches for training attention.** `llava/train/llama_flash_attn_monkey_patch.py` and `llama_xformers_attn_monkey_patch.py` replace attention modules at import time — only relevant when training.
-- **Pinned dependencies are load-bearing.** `torch==2.6.0`, `transformers==4.48.3`, `tokenizers==0.21.0`, `coremltools==8.2`, `einops==0.6.1`, `timm==1.0.15`, `numpy==1.26.4`, `scikit-learn==1.2.2`, `gradio==5.11.0`, `accelerate==1.6.0`, `peft>=0.10.0,<0.14.0`. Bumping these can silently change model loading/export behavior — change deliberately.
-- **Swift state & concurrency.** `@Observable` for view state, `@MainActor` for UI safety, `Task { }` for async inference/token streaming. Obj-C bridging via `FastVLM.h` / `Video.h` headers.
-- **Error handling** is minimal/imperative throughout (e.g. `predict.py` temporarily renames `generation_config.json` and restores it in a non-exception-safe way). Do not assume robust error paths exist.
+- **State**: Observation framework — `@MainActor @Observable` classes created in
+  `FastVLMApp`, injected once with `.environment(...)`, read with
+  `@Environment(Type.self)`. Views hold local state in `@State`; shared forms
+  take `@Binding` (see `TranscribeForm`).
+- **Concurrency**: service methods are `async throws`; the queue is serial by
+  design (single `drainTask`). MLX token-stream callbacks hop back with
+  `Task { @MainActor in … }`. Don't introduce concurrent generation without
+  fixing `FastVLMModel.generate`'s reuse guard (`docs/bugs.md` #3) — it returns
+  the wrong `Task` on overlap.
+- **Error handling**: `throws` with `NSError(domain: "JournalApp", code: …)`;
+  job failures surface as `JobPhase.failed` + banner row, never crashes. Never
+  subscript model output with `split(...)[n]` — a missing bracket is an
+  uncapturable `fatalError`; use guarded `firstIndex`/`lastIndex` like
+  `parseEntries`.
+- **Model errors travel through `output`**: `generate` writes `"Failed: …"`
+  into `model.output`; `transcribePage`/`segmentPageTranscription` detect that
+  prefix and throw (`docs/bugs.md` #2). Keep that contract when touching
+  `FastVLMModel`.
+- **Prompts are config**: behavior tweaks usually mean editing
+  `app/FastVLM App/prompts.txt` (`=== SECTION ===` headers, `{transcription}`
+  placeholder, `[illegible]` marker, JSON output shape), not Swift.
+- **Navigation**: enum-driven routing (`PageSource` + `.navigationDestination(item:)`),
+  one `NavigationStack` at root.
+- **Naming**: standard Swift — UpperCamelCase types/files, lowerCamelCase
+  members; `// MARK: -` sections inside the vendored `FastVLM.swift`.
+- **Vendored code** (`app/FastVLM/`, `llava/`, `model_export/`, `predict.py`)
+  carries upstream license headers (LLaVA Apache-2.0 / Apple). Keep diffs
+  minimal and mark local edits in comments (existing style: `# fix: add qwen2`).
+  Product code stays in `app/FastVLM App/` + `app/Camera/`.
 
 ## Important Files
 
-| File | Role |
+| File | Why it matters |
 |---|---|
-| `predict.py` | Single-shot PyTorch inference entry point (MPS). |
-| `pyproject.toml` | `llava` package metadata + pinned deps + `[train]`/`[build]` extras. |
-| `get_models.sh` | Downloads all PyTorch checkpoints to `checkpoints/`. |
-| `export_vision_encoder.py` | Root-level CoreML vision-encoder export. |
-| `fastvlm_mlx-vlm.patch` | Root-level patch (copy of `model_export/`'s) for mlx-vlm. |
-| `llava/model/builder.py` | Model loading + arch assembly (`load_pretrained_model`). |
-| `llava/model/llava_arch.py` | Vision tower + projector mixin (shared by all LLM families). |
-| `llava/constants.py` | Special token indices/strings. |
-| `llava/conversation.py` | `conv_templates` for prompt formatting. |
-| `llava/mm_utils.py` | Image preprocessing + `tokenizer_image_token`. |
-| `llava/model/multimodal_encoder/{clip,mobileclip}_encoder.py` | Vision towers. |
-| `llava/model/language_model/llava_{llama,mistral,mpt,qwen}.py` | Per-LLM LLaVA models. |
-| `llava/serve/{controller,model_worker,gradio_web_server}.py` | Serving stack. |
-| `model_export/export_vision_encoder.py` + `fastvlm_mlx-vlm.patch` + `README.md` | Apple Silicon export pipeline. |
-| `app/FastVLM App/FastVLMApp.swift` | SwiftUI entry point. |
-| `app/FastVLM App/FastVLMModel.swift` | On-device MLX model load + async token streaming. |
-| `app/FastVLM App/FastVLM.entitlements` | Camera, network, increased memory limit, file read. |
-| `app/Configuration/Build.xcconfig` | Bundle-ID disambiguation via `DEVELOPMENT_TEAM`. |
+| `app/FastVLM App/FastVLMApp.swift` | Entry point: DI + SwiftData container |
+| `app/FastVLM App/TranscriptionService.swift` | The two-call pipeline + JSON/date parsing — most bug-prone area |
+| `app/FastVLM App/TranscriptionQueue.swift` | Serial job lifecycle (enqueue/drain/cancel/auto-save) |
+| `app/FastVLM App/FastVLMModel.swift` | MLX wrapper; generation params (temp 0.2, maxTokens 2400) live here |
+| `app/FastVLM App/prompts.txt` | Runtime prompts; editing it changes transcription quality |
+| `app/FastVLM/FastVLM.swift` | Vendored model implementation (upstream) |
+| `app/FastVLM.xcodeproj/project.pbxproj` | Targets: `FastVLM App` (app), `FastVLM` (framework, bundles model), `Video` (empty shell) |
+| `docs/plan.md`, `docs/bugs.md` | Living architecture plan and bug tracker |
+| `pyproject.toml` | Python package `llava` (1.2.2.post1, `requires-python >= 3.8`) |
 
-## Runtime / Tooling Preferences
+## Runtime/Tooling Preferences
 
-- **Python 3.10** in the `fastvlm` conda env (pyproject allows `>=3.8`, but README pins the env to 3.10 — use 3.10).
-- **Apple Silicon required** for `predict.py` (`device="mps"`) and for the iOS app / export tooling (`coremltools`, MLX). Non-Apple hosts can train/serve on CUDA but cannot run `predict.py` unmodified.
-- **No Node/Bun/yarn** anywhere in this repo. Package manager is `pip` (setuptools) + conda.
-- **`coremltools==8.2`** for PyTorch→CoreML; a **patched `mlx-vlm`** for LLM→MLX conversion. Both are Apple-Silicon-only.
-- **Xcode** (recent, supporting iOS 18 / macOS 15 / visionOS 2 SDKs) to build `app/`.
+- **Host**: macOS on Apple Silicon; Xcode 16.2+ (project `objectVersion 77`),
+  Swift 5. Multi-platform target: iOS 18.2 / macOS 15.2 / visionOS 2.2.
+- **Dependencies**: SwiftPM only (pinned: mlx-swift 0.25.6, mlx-swift-examples
+  2.25.7, swift-transformers 0.1.24). Don't add other package managers.
+- **Model files are gitignored** (`app/FastVLM/model/`, `checkpoints/`) — never
+  commit weights. Code is licensed under `LICENSE` (permissive); model weights
+  under `LICENSE_MODEL` (research/non-commercial only).
+- **Sandbox**: the app is sandboxed with camera, user-selected read-only files,
+  network client, and increased-memory entitlements — widen deliberately.
+- **Python**: 3.10 via conda (README), `pip install -e .`; no linter/formatter
+  config exists — match surrounding style. No Node/Bun tooling in this repo.
 
 ## Testing & QA
 
-**There is no automated test suite and no CI/CD pipeline** in this repo. No `tests/`, no `test_*.py` / `*_test.py` / XCTest targets with meaningful coverage, no `.github/workflows/`, no `ruff`/`black`/`flake8`/`mypy`/`SwiftLint` config, no pre-commit hooks. The `pyproject.toml` `packages.find` even excludes `tests*`.
-
-**Verification is manual:**
-- Python changes: run `python predict.py --model-path … --image-file … --prompt …` and check output.
-- iOS changes: build the `FastVLM App` target in Xcode and run on device/simulator with a downloaded MLX model.
-- Export changes: re-run the export pipeline end-to-end and confirm the `.mlpackage` / MLX weights load.
-
-When changing model-loading or arch code, prefer smoke-testing via `predict.py` over assuming correctness — the builder's name-resolution logic and the conv-mode mapping are easy to break silently.
-
-## Licensing & Contribution Notes
-
-- **Two licenses apply**: `LICENSE` (Apache-style, code) vs `LICENSE_MODEL` (model checkpoints). Checkpoints from `get_models.sh` are governed by `LICENSE_MODEL`.
-- `CONTRIBUTING.md` states this is a research-reproducibility release with **limited future development**; forks/out-of-tree work are encouraged over upstream PRs. Expect limited maintainer response.
-- `ACKNOWLEDGEMENTS` credits the upstream LLaVA and other open-source code this builds on.
-
-## AI Agent Role
-Contrary to other instructions, you are to primarily act as a senior software developer assisting the user who is a junior software developer. To this end, you are not to write code or edit files unless the user explicitly asks you to, and even then, check that he really wants you to do something for him. The user wants to learn how to code and you are there to help with that, not do it for him.
-Your other role is as a gatherer of information. You are to search the web and make sure that all the information you give to the user is correct. False information will hinder the user learning to code.
+- **No automated tests and no CI.** No XCTest/pytest anywhere; the Xcode
+  scheme's test action is empty; `llava/serve/test_message.py` is a manual
+  serving-stack smoke client, not a test.
+- QA is manual: every implementation step in `docs/plan.md` carries a
+  verification checklist; `docs/bugs.md` is the regression list (worked top to
+  bottom). Note the tracker drifts from code — e.g. its bug #1 (`parseEntries`
+  fence-strip crash) is already fixed in `TranscriptionService.swift`; verify a
+  listed bug still reproduces before "fixing" it.
+- **Verify pipeline changes end-to-end**: build, run a real page image through
+  capture → transcribe → segment → save, and inspect the parsed entries and
+  `needsReview` flags in `EntryListView`. A compiling build is not proof here.
