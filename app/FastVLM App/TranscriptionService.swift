@@ -1,6 +1,6 @@
 import Foundation
 import CoreImage
-import MLXLMCommon
+import FoundationModels
 
 struct ParsedEntry {
     var entry: String
@@ -17,21 +17,48 @@ struct ParsedEntryRaw: Codable {
     var orderInPage: Int
 }
 
+// Guided-generation shape for the segmentation pass. The wrapper struct
+// exists because top-level array generation is the less-documented API
+// shape; a collection inside one @Generable struct is the canonical pattern.
+@Generable
+struct SegmentedEntry {
+    @Guide(description: "The entry date in YYYY-MM-DD format, or an empty string if the entry has no date.")
+    var date: String
+
+    @Guide(description: "The journal entry text, copied verbatim from the transcription.")
+    var entry: String
+
+    @Guide(description: "1-indexed position of the entry on the page.")
+    var orderInPage: Int
+}
+
+@Generable
+struct SegmentedPage {
+    @Guide(description: "The journal entries, in page order.")
+    var entries: [SegmentedEntry]
+}
+
 @MainActor
 @Observable
 class TranscriptionService {
-    private let model: FastVLMModel
+    init() {}
 
-    init(model: FastVLMModel) {
-        self.model = model
+    // Apple Intelligence must be available before any session work.
+    private func ensureAppleIntelligence() throws {
+        guard case .available = SystemLanguageModel.default.availability else {
+            throw NSError(domain: "JournalApp", code: 2, userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Apple Intelligence is unavailable: \(SystemLanguageModel.default.availability)",
+            ])
+        }
     }
 
     // Load prompts from the prompts.txt file
     func loadPrompts() throws -> (transcription: String, segmentation: String) {
         guard let url = Bundle.main.url(forResource: "prompts", withExtension: "txt") else {
             throw NSError(
-                domain: "JournalApp", 
-                code: 1, 
+                domain: "JournalApp",
+                code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "prompts.txt not found in bundle"])
         }
         let contents = try String(contentsOf: url, encoding: .utf8)
@@ -53,79 +80,59 @@ class TranscriptionService {
 
     // Transcribe a page image
     func transcribePage(_ image: CIImage) async throws -> String {
+        try ensureAppleIntelligence()
         let prompts = try loadPrompts()
-        let userInput = UserInput(
-            prompt: .text(prompts.transcription),
-            images: [.ciImage(image)],
-        )
-        // model.generate is async, so we need await
-        let task = await model.generate(userInput)
-        _ = await task.result
-        return model.output
+        // One session per call: no shared transcript, no context growth
+        // across pages.
+        let session = LanguageModelSession()
+        let response = try await session.respond {
+            prompts.transcription
+            Attachment(image)
+        }
+        return response.content
     }
 
     // Segment a page transcription into entries
     func segmentPageTranscription(_ transcription: String, pageDate: Date) async throws -> [ParsedEntry] {
+        try ensureAppleIntelligence()
         let prompts = try loadPrompts()
         let filledPrompt = prompts.segmentation
             .replacingOccurrences(of: "{transcription}", with: transcription)
-        
-        let userInput = UserInput(prompt: .text(filledPrompt),
-        images: [])
-        let task = await model.generate(userInput)
-        _ = await task.result
 
-        // If the output starts with "Failed:", throw an error
-        if model.output.starts(with: "Failed:") {
-            throw NSError(
-                domain: "JournalApp", 
-                code: 4, 
-                userInfo: [NSLocalizedDescriptionKey: model.output]
-                )
+        let session = LanguageModelSession()
+        let response = try await session.respond(
+            to: filledPrompt,
+            generating: SegmentedPage.self)
+
+        let raws: [ParsedEntryRaw] = response.content.entries.map { segment in
+            ParsedEntryRaw(
+                entry: segment.entry,
+                date: Self.parseDate(segment.date),
+                orderInPage: segment.orderInPage)
         }
-        return try parseEntries(from: model.output, pageDate: pageDate)
+        return try inferDates(from: raws, pageDate: pageDate)
     }
 
-    // Parse entries from a page transcription
-    func parseEntries(from output: String, pageDate: Date) throws -> [ParsedEntry] {
-        guard let start = output.firstIndex(of: "["),
-            let end = output.lastIndex(of: "]"),
-            start < end else {
-                throw NSError(
-                    domain: "JournalApp", 
-                    code: 3, 
-                    userInfo: [NSLocalizedDescriptionKey: "Failed to find JSON in output"]
-                    )
-            }
-        let jsonData = output[start..<end].data(using: .utf8)
-        guard let jsonData = jsonData else {
-            throw NSError(domain: "JournalApp", code: 1, userInfo: [NSLocalizedDescriptionKey: "JSON Decoding failed"])
-        }
-
-        let decoder = JSONDecoder()
+    // Parse a guided-generation date string ("YYYY-MM-DD", "null", or "")
+    // into a Date; anything unparseable becomes nil.
+    private static func parseDate(_ value: String) -> Date? {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.lowercased() != "null" else { return nil }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = TimeZone(secondsFromGMT: 0)  // dates are date-only, UTC makes sense
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let dateString = try container.decode(String.self)
-            guard let date = formatter.date(from: dateString) else {
-                throw DecodingError.dataCorruptedError(
-                    in: container,
-                    debugDescription: "Expected yyyy-MM-dd, got: \(dateString)")
-            }
-            return date
-        }
-        let entries: [ParsedEntryRaw] = try decoder.decode([ParsedEntryRaw].self, from: jsonData)
-        
-        let parsedEntries: [ParsedEntry] = try inferDates(from: entries, pageDate: pageDate)
-        return parsedEntries
+        return formatter.date(from: trimmed)
     }
 
     // Infer dates from the order of entries and the page data
     func inferDates(from entries: [ParsedEntryRaw], pageDate: Date) throws -> [ParsedEntry] {
-        let sortedEntries: [ParsedEntryRaw] = entries.sorted { $0.orderInPage < $1.orderInPage }
+        // Sort by orderInPage, breaking ties by source position — the model
+        // occasionally emits duplicate orderInPage values, and an ambiguous
+        // sort could reorder same-ranked entries and mis-infer dates.
+        let sortedEntries: [ParsedEntryRaw] = entries.enumerated()
+            .sorted { ($0.element.orderInPage, $0.offset) < ($1.element.orderInPage, $1.offset) }
+            .map(\.element)
         var parsedEntries: [ParsedEntry] = []
         var date: Date
         for (index, entry) in sortedEntries.enumerated() {

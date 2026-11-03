@@ -5,27 +5,13 @@ Output only the transcribed text — no commentary, descriptions, or formatting 
 If any text is illegible, indicate it with [illegible]. Return only the transcribed page, nothing else.
 
 === ENTRY SEGMENTATION PROMPT ===
-The following is a transcription of a handwritten journal page. Segment it into distinct journal entries with the date and position on the page of each.
+The following is a transcription of a handwritten journal page. Segment it into distinct journal entries.
 Each entry is a self-contained record of one or more days.
-Output the following JSON format:
-[
-    {
-        "date": "YYYY-MM-DD",
-        "entry": "<journal entry>",
-        "orderInPage": Int
-    },
-    {
-        "date": "YYYY-MM-DD",
-        "entry": "<journal entry>",
-        "orderInPage": Int
-    }
-]
-If an entry begins with or contains a date, extract it in YYYY-MM-DD format. 
-If no date is found in the entry, output "DATE: null" -- the app will populate any missing dates.
-The orderInPage entry should be 1-indexed.
-Do not modify the transcription text itself and do not output anything but the specified JSON.
+A handwritten date on its own line starts a new entry and belongs to ALL text between it and the next date line. Text appearing BEFORE the first date line is its own undated entry.
+For each entry, extract its date in YYYY-MM-DD format; if an entry has no date line of its own, set date to an empty string.
+Number the entries sequentially: the orderInPage entry is 1-indexed (the first entry is 1, the second is 2, and so on).
+Do not modify the transcription text itself.
 
 Transcription:
 {transcription}
 
-Segmented JSON:

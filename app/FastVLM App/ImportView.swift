@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 
 struct ImportView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var pickedItems: [PhotosPickerItem] = []
     @State private var pageImages: [Data] = []
 
@@ -16,6 +17,11 @@ struct ImportView: View {
             }
         }
         .navigationTitle("New Page")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+        }
         .onChange(of: pickedItems) {
             Task { @MainActor in
                 var images: [Data] = []

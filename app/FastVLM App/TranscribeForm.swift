@@ -1,6 +1,10 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
 import UIKit
+#else
+import ImageIO
+#endif
 
 // Shared tail of both new-page screens: photo preview, first-entry date,
 // and the Transcribe hand-off. Owned by ImportView and CaptureView, which
@@ -20,9 +24,8 @@ struct TranscribeForm: View {
                     .fill(.secondary)
                     .frame(height: 170)
                     .overlay(Text("No photos yet"))
-            } else if pageImages.count == 1,
-                      let uiImage = UIImage(data: pageImages[0]) {
-                Image(uiImage: uiImage)
+            } else if pageImages.count == 1, let preview = previewImage(pageImages[0]) {
+                preview
                     .resizable()
                     .scaledToFit()
                     .frame(maxHeight: 400)
@@ -30,8 +33,8 @@ struct TranscribeForm: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(pageImages.indices, id: \.self) { index in
-                            if let uiImage = UIImage(data: pageImages[index]) {
-                                Image(uiImage: uiImage)
+                            if let preview = previewImage(pageImages[index]) {
+                                preview
                                     .resizable()
                                     .scaledToFill()
                                     .frame(width: 120, height: 160)
@@ -60,5 +63,23 @@ struct TranscribeForm: View {
             }
             .disabled(pageImages.isEmpty)
         }
+    }
+
+    // Decoded preview. UIKit platforms decode UIImage directly (orientation
+    // applied at render); macOS falls back to ImageIO with the EXIF
+    // orientation baked in so previews don't appear rotated.
+    private func previewImage(_ data: Data) -> Image? {
+        #if canImport(UIKit)
+        guard let uiImage = UIImage(data: data) else { return nil }
+        return Image(uiImage: uiImage)
+        #else
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateThumbnailAtIndex(
+                  source, 0,
+                  [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                   kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary)
+        else { return nil }
+        return Image(decorative: cgImage, scale: 1, orientation: .up)
+        #endif
     }
 }

@@ -3,18 +3,16 @@
 **Still a work in progress**
 
 An iOS/macOS app that turns photos of handwritten journal pages into searchable
-text. Photograph or import one or more pages, and an on-device Vision-Language
-Model transcribes the handwriting; a second model pass splits each transcription
+text. Photograph or import one or more pages, and Apple's on-device model
+transcribes the handwriting; a second model pass splits each transcription
 into individual dated entries. Entries and their source images are stored
 locally with SwiftData, so you can browse and search your journal later — all
 privately, with no data leaving the device.
 
-The transcription engine is
-**[FastVLM: Efficient Vision Encoding for Vision Language Models](https://www.arxiv.org/abs/2412.13303) (CVPR 2025)**,
-forked from [apple/ml-fastvlm](https://github.com/apple/ml-fastvlm). FastVLM's
-FastViTHD vision encoder is fast enough for on-device handwriting transcription;
-this project repurposes its demo app into a capture → transcribe → store →
-search workflow.
+The transcription engine is **Apple Intelligence (Foundation Models)** — the
+system language model, with image understanding for page photos and guided
+generation for structured segmentation. Nothing to download: the model ships
+with the OS.
 
 <p align="center">
 <img src="docs/acc_vs_latency_qwen-2.png" alt="Accuracy vs latency figure." width="400"/>
@@ -37,26 +35,24 @@ search workflow.
 
 ## Status
 
-The journal flow is implemented end-to-end: multi-page capture/import, on-device
-transcription and segmentation, a serial transcription queue with progress
-banner, and browse/search over saved entries. Remaining work: a page view with
-re-transcription and polish — see [`docs/plan.md`](docs/plan.md) for step status
-and [`AGENTS.md`](AGENTS.md) for the codebase structure.
+The journal flow is implemented end-to-end on Apple Intelligence: multi-page
+capture/import, on-device transcription and segmentation via Foundation Models,
+a serial transcription queue with progress banner, and browse/search over saved
+entries. Remaining work: a page view with re-transcription and polish — see
+[`docs/plan.md`](docs/plan.md) for step status and [`AGENTS.md`](AGENTS.md)
+for the codebase structure.
 
 ## Getting Started
 
-The app runs the FastVLM model on-device. You need a Mac (Apple Silicon) with
-Xcode to build it.
+The app uses the built-in Apple Intelligence model. You need a Mac (Apple
+Silicon) with Xcode to build it.
 
-### Download a model
+### Requirements
 
-```bash
-chmod +x app/get_pretrained_mlx_model.sh
-app/get_pretrained_mlx_model.sh --model 0.5b --dest app/FastVLM/model
-```
-
-Model options: `0.5b` (fastest, FP16), `1.5b` (balanced, INT8), `7b` (most
-accurate, INT4). See [`app/README.md`](app/README.md) for details.
+- A device that supports Apple Intelligence (Apple Silicon Mac, or iPhone
+  15 Pro or newer) with Apple Intelligence enabled in System Settings /
+  Settings. Without it, transcription jobs fail with an availability message.
+- Xcode 27 or newer; the app targets iOS 27 / macOS 27 / visionOS 27.
 
 ### Build and run
 
@@ -64,9 +60,9 @@ accurate, INT4). See [`app/README.md`](app/README.md) for details.
 open app/FastVLM.xcodeproj
 ```
 
-Select the `FastVLM App` target and a destination (iOS 18.2+ device/simulator,
-or My Mac on macOS 15.2+), set your development team under Signing & Capabilities,
-then `⌘R`.
+Select the `FastVLM App` target and a destination (iOS device, or My Mac on
+macOS 27+), set your development team under Signing & Capabilities, then `⌘R`.
+No model download is needed — the engine is part of the OS.
 
 ### Python inference / training (optional)
 

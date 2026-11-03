@@ -11,6 +11,9 @@ class JournalPage {
     var imageData: Data
     var firstEntryDate: Date
     var fullTranscription: String
+    // Set when transcription failed; nil = clean. A failed page is saved with
+    // an empty fullTranscription so it stays browsable and re-runnable.
+    var transcriptionError: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -23,6 +26,7 @@ class JournalPage {
         self.imageData = imageData
         self.firstEntryDate = firstEntryDate
         self.fullTranscription = ""
+        self.transcriptionError = nil
         self.createdAt = Date()
         self.updatedAt = Date()
     }
