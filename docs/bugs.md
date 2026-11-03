@@ -3,11 +3,20 @@
 Original review 2026-10-05; re-reviewed 2026-10-06 after first round of fixes.
 Fixed in round 1: `ParsedEntryRaw: Codable`, nested `NavigationStack` removed,
 `en_US_POSIX` locale, `.applyOrientationProperty`, empty `TranscriptionView.swift` deleted.
-Work through top to bottom. Status: `[ ]` open, `[x]` fixed, `[~]` won't fix (with reason).
+Fixed 2026-10 (engine swap): #1(a), #1(b), #2, #3 closed by moving the pipeline
+to Foundation Models — typed guided generation removes the JSON parsing path
+entirely, and the throwing `LanguageModelSession.respond` API replaces the
+output-smuggling FastVLM wrapper (deleted). Work through top to bottom.
+Status: `[ ]` open, `[x]` fixed, `[~]` won't fix (with reason).
 
 ---
 
 ## 1. Fence-strip in `parseEntries` can crash the app — introduced by the fix
+
+- **Status:** `[x]` Fixed 2026-10 — engine swapped to Foundation Models with
+  typed guided generation (`SegmentedPage`); `parseEntries` and the bracket
+  slicing no longer exist. `[illegible]` markers pass through guided
+  generation verbatim (verified by probe).
 
 - **File:** `app/FastVLM App/TranscriptionService.swift:59`
 - **Severity:** 🔴 runtime crash (regression)
@@ -53,6 +62,11 @@ mutated — use `let`.
 
 ## 2. Generation errors smuggled through `model.output`
 
+- **Status:** `[x]` Fixed 2026-10 — `FastVLMModel` deleted with the MLX
+  engine; `LanguageModelSession.respond` is a throwing API, so failures
+  propagate as errors into `TranscriptionQueue.drain`'s catch and surface as
+  `JobPhase.failed(error.localizedDescription)`.
+
 - **File:** `app/FastVLM App/FastVLMModel.swift:167`
 - **Severity:** 🟡 feeds bug #1, misleading errors
 
@@ -69,6 +83,10 @@ propagate it.
 
 ## 3. `generate` reuse guard can return the wrong task
 
+- **Status:** `[x]` Fixed 2026-10 — obsolete with the FastVLM wrapper deleted;
+  the new service creates one `LanguageModelSession` per call, so there is no
+  shared task to race.
+
 - **File:** `app/FastVLM App/FastVLMModel.swift:113`
 - **Severity:** 🟢 not reachable today, but a landmine
 
@@ -83,10 +101,10 @@ wrong output if parallel jobs are ever added.
 
 ## 4. Minor / cleanup
 
-- `[ ]` Error domain typo `"JounalApp"` still in `TranscriptionService.swift:19,33`
-  (code 3 was fixed to `"JournalApp"` — domains are now inconsistent; pick one spelling).
-- `[ ]` `loadPrompts`' error message is misleading: the guard also fires when
-  count is 3 but the preamble is non-empty, printing "expected two prompts, got 3".
+- `[x]` Error domain typo `"JounalApp"` — fixed 2026-10 in the service rewrite;
+  all domains are now `"JournalApp"`.
+- `[x]` `loadPrompts`' misleading count message — obsolete 2026-10: the rewrite
+  splits on the two `===` headers with a single "not separating cleanly" error.
 - `[ ]` Photos picker gotcha: `onChange(of: photosPickerItem)` won't re-fire if
   the user re-picks the **identical** photo after Cancel → `capturedImage` stays
   nil and Transcribe stays disabled. Low priority.

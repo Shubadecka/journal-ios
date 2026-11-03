@@ -13,12 +13,14 @@ struct TranscriptionJob: Identifiable {
     let imageData: Data
     let firstEntryDate: Date
     var phase: JobPhase
-    var parsedEntries: [ParsedEntry]?
+    // Set ⇒ drain updates this page instead of inserting a new one
+    // (re-transcription of an existing page).
+    var existingPage: JournalPage?
 }
 
 // @MainActor keeps SwiftData access and @Observable updates on the main
-// thread — the heavy inference still runs on the GPU inside MLX, so this
-// doesn't block the UI while a job is generating.
+// thread — the heavy inference still runs on the GPU inside Apple
+// Intelligence, so this doesn't block the UI while a job is generating.
 @MainActor
 @Observable
 class TranscriptionQueue {
@@ -34,12 +36,24 @@ class TranscriptionQueue {
     private var drainTask: Task<Void, Never>?
 
     init() {
-        service = TranscriptionService(model: FastVLMModel())
+        service = TranscriptionService()
     }
 
     func enqueue(imageData: Data, firstEntryDate: Date, modelContext: ModelContext) {
         jobs.append(TranscriptionJob(
             imageData: imageData, firstEntryDate: firstEntryDate, phase: .queued))
+        startDrainingIfNeeded(modelContext: modelContext)
+    }
+
+    // Re-run transcription for an existing page. The drain loop updates that
+    // page in place (new text + entries, old exclusive entries removed) — no
+    // second copy of the page is created.
+    func retranscribe(page: JournalPage, modelContext: ModelContext) {
+        jobs.append(TranscriptionJob(
+            imageData: page.imageData,
+            firstEntryDate: page.firstEntryDate,
+            phase: .queued,
+            existingPage: page))
         startDrainingIfNeeded(modelContext: modelContext)
     }
 
@@ -74,12 +88,26 @@ class TranscriptionQueue {
             let id = jobs[index].id
             let firstEntryDate = jobs[index].firstEntryDate
 
-            guard let image = CIImage(data: jobs[index].imageData, options: [.applyOrientationProperty: true]) else {
-                setPhase(.failed("Could not read image data"), for: id)
-                continue
+            // Resolve/create the page BEFORE transcribing so PageView rows
+            // bind spinners to existingPage uniformly — a page row exists
+            // while its job runs, even if transcription later fails.
+            let page: JournalPage
+            if let existing = jobs[index].existingPage {
+                page = existing
+            } else {
+                page = JournalPage(
+                    imageData: jobs[index].imageData, firstEntryDate: firstEntryDate)
+                modelContext.insert(page)
+                jobs[index].existingPage = page
             }
 
             do {
+                guard let image = CIImage(data: page.imageData,
+                                          options: [.applyOrientationProperty: true]) else {
+                    throw NSError(domain: "JournalApp", code: 5,
+                        userInfo: [NSLocalizedDescriptionKey: "Could not read image data"])
+                }
+
                 setPhase(.transcribing, for: id)
                 let transcription = try await service.transcribePage(image)
 
@@ -87,12 +115,20 @@ class TranscriptionQueue {
                 let entries = try await service.segmentPageTranscription(
                     transcription, pageDate: firstEntryDate)
 
+                // A successful run replaces this page's text: drop the page's
+                // stale exclusive entries first (entries shared with other
+                // pages survive, link included — stale page-side text is
+                // accepted), then update the page. For a fresh page the
+                // snapshot is empty, so this is a no-op — one uniform path.
+                let staleEntries = page.entries
+                for entry in staleEntries where entry.pages.count == 1 {
+                    modelContext.delete(entry)
+                }
+                page.fullTranscription = transcription
+                page.transcriptionError = nil
+
                 // Auto-save to SwiftData. The queue is @MainActor, so
                 // modelContext is safe to use here.
-                let page = JournalPage(
-                    imageData: jobs[index].imageData, firstEntryDate: firstEntryDate)
-                page.fullTranscription = transcription
-                modelContext.insert(page)
                 for entry in entries {
                     let journalEntry = JournalEntry(
                         text: entry.entry,
@@ -106,6 +142,9 @@ class TranscriptionQueue {
                 setPhase(.done, for: id)
                 scheduleRemoval(id)
             } catch {
+                // Keep the page (with its old entries on a failed re-run) and
+                // record why it failed — PageView/PageDetailView surface this.
+                page.transcriptionError = error.localizedDescription
                 setPhase(.failed(error.localizedDescription), for: id)
             }
         }

@@ -109,163 +109,88 @@ One line, and every view in the app can now read/write `JournalPage` and
 
 ## The transcription pipeline
 
-The core flow is two model calls per page:
+The core flow is two model calls per page, both served by Apple's on-device
+system model through the **Foundation Models** framework (no bundled weights,
+no MLX, nothing to download before building):
 
 ```
 Page image ──Call 1──▶ full transcription ──Call 2──▶ separated entries + dates
    (image→text)                               (text→text)
 ```
 
-### How the existing model code works
+### Availability gate
 
-`app/FastVLM App/FastVLMModel.swift` already has the inference plumbing. The key
-method is:
+`TranscriptionService.ensureAppleIntelligence()` runs first in both passes:
 
 ```swift
-public func generate(_ userInput: UserInput) async -> Task<Void, Never>
+guard case .available = SystemLanguageModel.default.availability else {
+    throw NSError(domain: "JournalApp", code: 2, userInfo: [
+        NSLocalizedDescriptionKey:
+            "Apple Intelligence is unavailable: \(SystemLanguageModel.default.availability)",
+    ])
+}
 ```
 
-`UserInput` is a type from the MLX library that bundles a prompt string and
-optional images. The current demo always passes an image. For our flow:
-- **Call 1** (transcription): pass the page image + the transcription prompt.
-- **Call 2** (segmentation): pass *no image*, just the segmentation prompt with
-  the transcription text injected. This is a text-only LLM call.
+If the device doesn't run Apple Intelligence, every job fails at the banner
+with this message — there is no fallback engine, by design. All inference stays
+on-device; Private Cloud Compute is deliberately not used.
 
-> **Gotcha to test:** The VLM may expect an image token in every prompt. Whether
-> a text-only `UserInput(images: [])` works cleanly needs to be confirmed by
-> running it. If it doesn't, we can pass a dummy 1×1 image as a workaround.
+### Call 1: transcription (`transcribePage`)
+
+A fresh `LanguageModelSession` per call (no shared transcript, so context never
+grows across pages), the transcription prompt from `prompts.txt`, and the page
+image attached directly — the framework handles scaling and color conversion:
+
+```swift
+let session = LanguageModelSession()
+let response = try await session.respond {
+    prompts.transcription
+    Attachment(image)   // CIImage in, framework converts
+}
+return response.content
+```
+
+The queue already decodes page JPEGs with
+`CIImage(data:, options: [.applyOrientationProperty: true])`, so EXIF rotation
+is handled before the attachment is built.
+
+### Call 2: segmentation (`segmentPageTranscription`)
+
+Text-only. The `{transcription}` placeholder in the segmentation prompt is
+filled in, then guided generation returns a typed value instead of freeform
+JSON:
+
+```swift
+let response = try await session.respond(
+    to: filledPrompt,
+    generating: SegmentedPage.self)
+```
+
+`SegmentedPage`/`SegmentedEntry` are `@Generable` structs with `@Guide`
+descriptions in `TranscriptionService.swift`; the schema is derived from them,
+so malformed-model-output bugs (fence stripping, bracket slicing) cannot occur
+— the model is constrained to the shape at generation time. `date` comes back
+as `YYYY-MM-DD` or an empty string; `parseDate` maps anything unparseable to
+`nil`, and `inferDates` fills missing dates (first entry falls back to the
+page date, later entries to previous date + 1 day) and sets
+`needsReview == true` for inferred ones.
 
 ### The prompts
 
-Both prompts live in `app/FastVLM App/prompts.txt` (already created) so you can
-edit them without touching code. The file has two sections:
+Both prompts live in `app/FastVLM App/prompts.txt` so you can edit them
+without touching code. The file has two `=== … ===` sections:
+**TRANSCRIPTION PROMPT** (sent with the image) and **ENTRY SEGMENTATION
+PROMPT** (sent with the transcription text injected at `{transcription}`).
+Because guided generation enforces the output shape, the segmentation prompt
+carries semantics only: how to split entries, that a date line heads the text
+below it, `YYYY-MM-DD` formatting, empty string for undated entries, and
+1-indexed sequential `orderInPage`.
 
-**Transcription prompt** — sent to the VLM with the page image:
-```
-Transcribe all handwritten text on this journal page exactly as written...
-```
-
-**Segmentation prompt** — sent to the VLM with the transcription text only. It
-contains a `{transcription}` placeholder that code fills in, and instructs the
-model to output entries with dates in a parseable format:
-```
-DATE: 2025-07-14
-Today I went to the park and...
----
-DATE: none
-Woke up early, couldn't sleep...
-```
-
-> **Xcode gotcha:** For the app to read `prompts.txt` at runtime, it must be in
-> the app's bundle. In Xcode, select the `FastVLM App` target → Build Phases →
-> Copy Bundle Resources, and add `prompts.txt`. If you skip this,
-> `Bundle.main.url(forResource: "prompts", withExtension: "txt")` returns `nil`.
-
-### Creating the transcription service
-
-New file: `app/FastVLM App/TranscriptionService.swift`
-
-This wraps the two-call flow and parses the output. Think of it like a service
-layer in a Python/JS backend — it orchestrates the model calls and returns
-structured data.
-
-```swift
-import Foundation
-import CoreImage
-
-// A simple struct to hold parsed entries before they're saved to SwiftData.
-// "struct" here because it's a lightweight value passed around, not persisted.
-struct ParsedEntry {
-    var text: String
-    var date: Date?              // nil means "none" → fall back to page date
-    var orderInPage: Int
-}
-
-@Observable
-class TranscriptionService {
-    private let model: FastVLMModel
-
-    init(model: FastVLMModel) {
-        self.model = model
-    }
-
-    // Load prompts from the bundled prompts.txt file.
-    // Think: reading a config file at runtime instead of hardcoding strings.
-    func loadPrompts() throws -> (transcription: String, segmentation: String) {
-        guard let url = Bundle.main.url(forResource: "prompts", withExtension: "txt") else {
-            throw NSError(domain: "JournalApp", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "prompts.txt not found in bundle"])
-        }
-        let content = try String(contentsOf: url, encoding: .utf8)
-        // Split on "=== ... ===" headers to separate the two prompts.
-        // (Exact parsing logic here — split by the section headers)
-        // ...
-        return (transcriptionPrompt, segmentationPrompt)
-    }
-
-    // Step 1: image → full transcription text
-    func transcribe(image: CIImage) async throws -> String {
-        let prompts = try loadPrompts()
-        let userInput = UserInput(
-            prompt: .text(prompts.transcription),
-            images: [.ciImage(image)]
-        )
-        // model.generate is async and streams tokens into model.output.
-        // We await its completion, then read model.output.
-        let task = await model.generate(userInput)
-        _ = await task.result
-        return model.output
-    }
-
-    // Step 2: transcription text → separated entries with dates
-    func segment(transcription: String, pageDate: Date) async throws -> [ParsedEntry] {
-        let prompts = try loadPrompts()
-        // Replace the {transcription} placeholder with the actual text.
-        // Like Python's prompt.replace("{transcription}", transcription)
-        let filledPrompt = prompts.segmentation
-            .replacingOccurrences(of: "{transcription}", with: transcription)
-
-        let userInput = UserInput(prompt: .text(filledPrompt), images: [])
-        let task = await model.generate(userInput)
-        _ = await task.result
-
-        return parseEntries(from: model.output, fallbackDate: pageDate)
-    }
-
-    // Parse the model's output format:
-    //   DATE: 2025-07-14
-    //   entry text here
-    //   ---
-    //   DATE: none
-    //   next entry
-    func parseEntries(from output: String, fallbackDate: Date) -> [ParsedEntry] {
-        // Split on "---" lines, extract DATE: line from each chunk.
-        // This is plain string processing — same logic you'd write in Python.
-        // ...
-    }
-}
-```
-
-### Swift async/await — for a Python/JS developer
-
-If you've used `async/await` in Python or JS, Swift's version is nearly
-identical:
-
-```python
-# Python                          # Swift
-async def transcribe(image):      func transcribe(image: CIImage) async throws -> String
-    result = await model.run()        let result = await model.generate(input)
-    return result                    return result
-```
-
-```javascript
-// JavaScript                      // Swift
-const result = await model.run()   let result = await model.generate(input)
-```
-
-`Task { }` is like launching a background Promise — it runs the async code
-without blocking the UI. The existing `FastVLMModel.generate` already uses this
-pattern.
+> **Gotcha that surfaced in testing:** the model initially paired each date
+> with the *preceding* paragraph. The rule "a date line belongs to ALL text
+> between it and the next date line; text before the first date line is its
+> own undated entry" fixed the pairing. If you touch the prompt, re-run the
+> segmentation probe with an undated-first-entry page.
 
 ---
 
@@ -276,8 +201,10 @@ it into a multi-screen app. Here's the screen map:
 
 ```
 App root (FastVLMApp)
-├── TranscriptionBanner  ← pinned above every screen (safeAreaInset at the root);
-│                          shows queue status, expands inline for job details
+├── RootView             ← shell: bottom bar with Entries / Pages / + / Settings;
+│                          banner stays pinned at the top of the content (a plain
+│                          VStack row, zero-height when the queue is idle)
+├── TranscriptionBanner  ← queue status row; expands inline for job details
 ├── EntryListView        ← main screen: browse + search entries (replaces ContentView's role)
 │   ├── CaptureButton    ← opens CaptureView
 │   ├── SearchBar        ← filters entries by text
@@ -723,17 +650,18 @@ for free.
 
 | File | Role | Status |
 |---|---|---|
-| `app/FastVLM App/FastVLMApp.swift` | App entry point — will get `.modelContainer` + root view change | Modify |
-| `app/FastVLM App/FastVLMModel.swift` | Model loading + inference — reuse as-is | Keep |
+| `app/FastVLM App/FastVLMApp.swift` | App entry point — injects the SwiftData container + TranscriptionQueue into `RootView` | Done |
+| `app/FastVLM App/RootView.swift` | Bottom-bar shell: per-tab NavigationStacks, banner row, new-page sheet | Done |
+| `app/FastVLM App/SettingsView.swift` | Apple Intelligence status, library stats, version, About/licenses | Done |
 | `app/FastVLM App/prompts.txt` | Transcription + segmentation prompts | Done |
-| `app/FastVLM App/JournalModels.swift` | SwiftData models | Create |
-| `app/FastVLM App/TranscriptionService.swift` | Two-call pipeline + parsing | Create |
+| `app/FastVLM App/JournalModels.swift` | SwiftData models (+ `transcriptionError` failure state on pages) | Done |
+| `app/FastVLM App/TranscriptionService.swift` | Two-call pipeline (Foundation Models: image attachment + guided generation) + date inference | Done |
 | `app/FastVLM App/TranscriptionQueue.swift` | Serial background job queue: transcribe → segment → auto-save. **In-memory only — app kill deletes all in-progress images/text.** | Done |
 | `app/FastVLM App/TranscriptionBanner.swift` | Inline queue banner pinned above every screen | Done |
 | `app/FastVLM App/EntryListView.swift` | Browse + search entries; red border on needsReview rows | Done |
 | `app/FastVLM App/CaptureView.swift` | Photo capture + date picker; enqueues and dismisses | Done |
-| `app/FastVLM App/PageView.swift` | Browse pages (thumbnails); derived state, spinner for in-flight jobs | Create |
-| `app/FastVLM App/PageDetailView.swift` | Page image + error; Re-transcribe button at the bottom | Create |
+| `app/FastVLM App/PageView.swift` | Browse pages (thumbnails); derived state, spinner for in-flight jobs | Done |
+| `app/FastVLM App/PageDetailView.swift` | Page image + error; Re-transcribe button at the bottom | Done |
 | `app/FastVLM App/EntryDetailView.swift` | Edit flagged entries: dates, text, merge (name TBD) | Create |
 | `app/Video/CameraController.swift` | AVFoundation camera | Reuse in CaptureView |
 | `app/Video/VideoFrameView.swift` | Camera preview view | Reuse in CaptureView |
@@ -750,7 +678,7 @@ for free.
 | Platform | iOS + macOS (universal, using `#if os(iOS)` / `#elseif os(macOS)`) |
 | Cross-page entries | Manual merge in the entry edit view (tap a flagged entry; can merge adjacent entries) |
 | Entry dating | Model extracts dates from text during segmentation; falls back to page's `firstEntryDate` |
-| Segmentation | Second VLM call (text-only) using the segmentation prompt |
+| Segmentation | Second model call (text-only, Foundation Models guided generation into `SegmentedPage`) using the segmentation prompt |
 | Prompts | `app/FastVLM App/prompts.txt` — editable, loaded at runtime via `Bundle.main` |
 | Transcription | Backgrounded serial queue (`TranscriptionQueue`) — no progress screen; user never waits on the model |
 | Job persistence | In-memory only: killing the app deletes all in-progress images and text; finished results auto-save to SwiftData |
@@ -763,13 +691,16 @@ for free.
 
 ## Open questions to resolve during implementation
 
-1. **Text-only VLM call:** Does `UserInput(images: [])` work cleanly with
-   FastVLM, or does the model require an image token? Test in Step 3. If not,
-   pass a 1×1 dummy image.
+1. **Text-only VLM call:** ~~Does `UserInput(images: [])` work cleanly with
+   FastVLM, or does the model require an image token?~~ Resolved 2026-10: the
+   engine is now Foundation Models; Call 2 is a plain text prompt with guided
+   generation, no image-token concerns exist.
 
-2. **Token streaming in the banner:** `FastVLMModel.generate` streams tokens
-   into `model.output` live. The banner shows phase + queue position, not live
-   text. Optional polish: a token/word count while a job is transcribing.
+2. **Token streaming in the banner:** ~~`FastVLMModel.generate` streams tokens
+   into `model.output` live.~~ Resolved 2026-10: FastVLMModel is deleted; the
+   Foundation Models session returns complete responses. The banner shows
+   phase + queue position. Optional polish: partial/streaming responses while a
+   job is transcribing (`session.streamResponse`).
 
 3. **Image storage size:** Storing full-resolution photos as `Data` in SwiftData
    works but can bloat the database. Consider downsampling before storage, or

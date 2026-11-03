@@ -1,4 +1,7 @@
 import SwiftUI
+#if !canImport(UIKit)
+import ImageIO
+#endif
 
 // Inline banner pinned above every screen (via .safeAreaInset at the app
 // root). Collapsed: one status line. Tap to expand per-job rows.
@@ -59,6 +62,7 @@ struct TranscriptionBanner: View {
     @ViewBuilder
     private func jobRow(_ job: TranscriptionJob) -> some View {
         HStack(spacing: 10) {
+            #if canImport(UIKit)
             if let uiImage = UIImage(data: job.imageData) {
                 Image(uiImage: uiImage)
                     .resizable()
@@ -70,6 +74,19 @@ struct TranscriptionBanner: View {
                     .fill(.secondary)
                     .frame(width: 36, height: 36)
             }
+            #else
+            if let thumbnail = Self.thumbnail(job.imageData) {
+                Image(decorative: thumbnail, scale: 2)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(.secondary)
+                    .frame(width: 36, height: 36)
+            }
+            #endif
 
             Text(job.firstEntryDate, style: .date)
 
@@ -103,4 +120,17 @@ struct TranscriptionBanner: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }
+
+    #if !canImport(UIKit)
+    // Orientation-transformed thumbnail for the macOS banner row.
+    private static func thumbnail(_ data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateThumbnailAtIndex(
+                  source, 0,
+                  [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                   kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary)
+        else { return nil }
+        return cgImage
+    }
+    #endif
 }
