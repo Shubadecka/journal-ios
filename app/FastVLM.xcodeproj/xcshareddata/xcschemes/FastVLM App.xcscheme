@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "019A3E092D78E6A00055F93B"
-               BuildableName = "FastVLM App.app"
+               BuildableName = "Journal Saver.app"
                BlueprintName = "FastVLM App"
                ReferencedContainer = "container:FastVLM.xcodeproj">
             </BuildableReference>
@@ -45,7 +45,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "019A3E092D78E6A00055F93B"
-            BuildableName = "FastVLM App.app"
+            BuildableName = "Journal Saver.app"
             BlueprintName = "FastVLM App"
             ReferencedContainer = "container:FastVLM.xcodeproj">
          </BuildableReference>
@@ -62,7 +62,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "019A3E092D78E6A00055F93B"
-            BuildableName = "FastVLM App.app"
+            BuildableName = "Journal Saver.app"
             BlueprintName = "FastVLM App"
             ReferencedContainer = "container:FastVLM.xcodeproj">
          </BuildableReference>

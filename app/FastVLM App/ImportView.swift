@@ -2,37 +2,31 @@ import SwiftUI
 import PhotosUI
 
 struct ImportView: View {
-    @Environment(\.dismiss) private var dismiss
+    // Closing is the sheet's swipe-down grabber (RootView presents it visible).
     @State private var pickedItems: [PhotosPickerItem] = []
-    @State private var pageImages: [Data] = []
+    @State private var drafts: [PageDraft] = []
 
     var body: some View {
-        VStack(spacing: 20) {
-            TranscribeForm(pageImages: $pageImages)
-
+        PageReviewView(drafts: $drafts) {
             PhotosPicker(selection: $pickedItems,
                          maxSelectionCount: 10,
                          matching: .images) {
-                Label("Import photo(s)", systemImage: "photo.on.rectangle")
+                Label("Import Additional Photo(s)", systemImage: "photo.on.rectangle")
             }
         }
         .navigationTitle("New Page")
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
-            }
-        }
         .onChange(of: pickedItems) {
             Task { @MainActor in
-                var images: [Data] = []
+                var loaded: [PageDraft] = []
                 for item in pickedItems {
-                    // A failed load is skipped; the Transcribe button stays
-                    // disabled while nothing loaded.
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        images.append(data)
+                    // A failed load or decode is skipped; the Transcribe
+                    // button stays disabled while nothing loaded.
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let draft = PageDraft(originalData: data) {
+                        loaded.append(draft)
                     }
                 }
-                pageImages = images
+                drafts = loaded
             }
         }
     }

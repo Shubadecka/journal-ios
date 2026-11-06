@@ -125,6 +125,14 @@ class TranscriptionService {
         return formatter.date(from: trimmed)
     }
 
+    // The page's date: the first date the segmentation actually detected,
+    // in page order (needsReview marks entries whose date was inferred, not
+    // detected). Falls back when the page has no detected date at all —
+    // new pages get the enqueue fallback, re-runs keep their previous date.
+    static func pageDate(from entries: [ParsedEntry], fallback: Date) -> Date {
+        entries.first(where: { !$0.needsReview })?.date ?? fallback
+    }
+
     // Infer dates from the order of entries and the page data
     func inferDates(from entries: [ParsedEntryRaw], pageDate: Date) throws -> [ParsedEntry] {
         // Sort by orderInPage, breaking ties by source position — the model

@@ -11,7 +11,10 @@ enum JobPhase: Equatable {
 struct TranscriptionJob: Identifiable {
     let id = UUID()
     let imageData: Data
-    let firstEntryDate: Date
+    // Anchors undated-entry inference; never becomes the page date — that
+    // comes from the first date the segmentation detects. Today for new
+    // jobs, the page's current date for re-runs.
+    let fallbackDate: Date
     var phase: JobPhase
     // Set ⇒ drain updates this page instead of inserting a new one
     // (re-transcription of an existing page).
@@ -39,9 +42,9 @@ class TranscriptionQueue {
         service = TranscriptionService()
     }
 
-    func enqueue(imageData: Data, firstEntryDate: Date, modelContext: ModelContext) {
+    func enqueue(imageData: Data, fallbackDate: Date, modelContext: ModelContext) {
         jobs.append(TranscriptionJob(
-            imageData: imageData, firstEntryDate: firstEntryDate, phase: .queued))
+            imageData: imageData, fallbackDate: fallbackDate, phase: .queued))
         startDrainingIfNeeded(modelContext: modelContext)
     }
 
@@ -51,7 +54,7 @@ class TranscriptionQueue {
     func retranscribe(page: JournalPage, modelContext: ModelContext) {
         jobs.append(TranscriptionJob(
             imageData: page.imageData,
-            firstEntryDate: page.firstEntryDate,
+            fallbackDate: page.firstEntryDate,
             phase: .queued,
             existingPage: page))
         startDrainingIfNeeded(modelContext: modelContext)
@@ -86,7 +89,7 @@ class TranscriptionQueue {
 
         while let index = jobs.firstIndex(where: { $0.phase == .queued }) {
             let id = jobs[index].id
-            let firstEntryDate = jobs[index].firstEntryDate
+            let fallbackDate = jobs[index].fallbackDate
 
             // Resolve/create the page BEFORE transcribing so PageView rows
             // bind spinners to existingPage uniformly — a page row exists
@@ -96,7 +99,7 @@ class TranscriptionQueue {
                 page = existing
             } else {
                 page = JournalPage(
-                    imageData: jobs[index].imageData, firstEntryDate: firstEntryDate)
+                    imageData: jobs[index].imageData, firstEntryDate: fallbackDate)
                 modelContext.insert(page)
                 jobs[index].existingPage = page
             }
@@ -113,7 +116,7 @@ class TranscriptionQueue {
 
                 setPhase(.segmenting, for: id)
                 let entries = try await service.segmentPageTranscription(
-                    transcription, pageDate: firstEntryDate)
+                    transcription, pageDate: fallbackDate)
 
                 // A successful run replaces this page's text: drop the page's
                 // stale exclusive entries first (entries shared with other
@@ -126,6 +129,13 @@ class TranscriptionQueue {
                 }
                 page.fullTranscription = transcription
                 page.transcriptionError = nil
+
+                // The page's date is the first date the segmentation actually
+                // detected, in page order — today never becomes the page date.
+                // A page with no detected date at all keeps the placeholder
+                // until a re-run detects one.
+                page.firstEntryDate = TranscriptionService.pageDate(
+                    from: entries, fallback: fallbackDate)
 
                 // Auto-save to SwiftData. The queue is @MainActor, so
                 // modelContext is safe to use here.

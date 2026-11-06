@@ -88,7 +88,9 @@ struct TranscriptionBanner: View {
             }
             #endif
 
-            Text(job.firstEntryDate, style: .date)
+            // Live page date once drain resolves/updates the page; the
+            // fallback (queued, not yet started) until then.
+            Text(job.existingPage?.firstEntryDate ?? job.fallbackDate, style: .date)
 
             Spacer()
 
