@@ -30,10 +30,14 @@ struct RootView: View {
             BottomBar(selectedTab: $selectedTab, newSheet: $newSheet)
         }
         .sheet(item: $newSheet) { sheet in
-            switch sheet {
-            case .importPhotos: ImportView()
-            case .takePhoto:    CaptureView()
+            Group {
+                switch sheet {
+                case .importPhotos: ImportView()
+                case .takePhoto:    CaptureView()
+                }
             }
+            // Visible grabber: swiping down is the sheet's close affordance.
+            .presentationDragIndicator(.visible)
         }
     }
 }
@@ -46,7 +50,7 @@ struct BottomBar: View {
         VStack(spacing: 0) {
             Divider()
             HStack {
-                tabButton(.entries, icon: "text.justifyleading", label: "Entries")
+                tabButton(.entries, icon: "book.closed", label: "Entries")
                 tabButton(.pages, icon: "photo.on.rectangle.angled", label: "Pages")
                 plusButton
                 tabButton(.settings, icon: "gearshape", label: "Settings")
@@ -85,10 +89,16 @@ struct BottomBar: View {
             }
             #endif
         } label: {
-            Image(systemName: "plus")
-                .font(.title2.bold())
-                .foregroundStyle(Color.accentColor)
+            // Matches the tab buttons: gray while idle like inactive tabs,
+            // accent-colored only while a new-page sheet is open.
+            VStack(spacing: 2) {
+                Image(systemName: "plus")
+                    .font(.title3.bold())
+                Text("New")
+                    .font(.caption2)
+            }
+            .foregroundStyle(newSheet == nil ? Color.secondary : Color.accentColor)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
     }
 }

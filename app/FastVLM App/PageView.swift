@@ -20,8 +20,11 @@ func pageThumbnail(from data: Data, maxPixelSize: CGFloat) -> CGImage? {
 // a set transcriptionError means "Failed", empty text means "Pending".
 struct PageView: View {
     @Environment(TranscriptionQueue.self) private var queue
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \JournalPage.createdAt, order: .reverse) private var pages: [JournalPage]
     @State private var selectedPage: JournalPage?
+    // The page whose trash button was tapped; non-nil shows the dialog.
+    @State private var pendingDelete: JournalPage?
 
     var body: some View {
         List {
@@ -31,6 +34,23 @@ struct PageView: View {
         }
         .navigationDestination(item: $selectedPage) { page in
             PageDetailView(page: page)
+        }
+        .alert(
+            "Delete Page?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }),
+            presenting: pendingDelete)
+        { page in
+            // The .cascade delete rule on JournalPage.entries removes every
+            // entry associated with this page — no manual loop needed.
+            Button("Cancel", role: .cancel) { }
+                .keyboardShortcut(.defaultAction)
+            Button("Delete Page", role: .destructive) {
+                modelContext.delete(page)
+            }
+        } message: { page in
+            Text("This permanently deletes this page and all \(page.entries.count) entries associated with it. This cannot be undone.")
         }
         .navigationTitle("Pages")
     }
@@ -54,6 +74,19 @@ struct PageView: View {
                 ProgressView()
                     .controlSize(.small)
             }
+
+            Button(role: .destructive) {
+                pendingDelete = page
+            } label: {
+                Label("Delete", systemImage: "trash")
+                    .labelStyle(.iconOnly)
+            }
+            // List-row gotcha: without a borderless style the whole row would
+            // trigger the button on iOS.
+            .buttonStyle(.borderless)
+            // Deleting a page mid-job would leave the drain loop writing into
+            // a deleted model — same guard Re-transcribe uses.
+            .disabled(isRunning)
         }
         .contentShape(Rectangle())
         .onTapGesture { selectedPage = page }

@@ -24,7 +24,9 @@ download. The repo has two halves:
 Two LLM calls per page, then SwiftData persistence:
 
 1. Capture: `EntryListView` → `ImportView` (PhotosPicker) or `CaptureView`
-   (`CameraPicker` wrapper) collect `[Data]` page images → `TranscribeForm`
+   (`CameraPicker` wrapper) collect page photos into `PageDraft`s →
+   `PageReviewView` (verification screen) lists them with Rotate/Crop/Undo
+   (edits in memory only; JPEG-encoded once at Transcribe) → Transcribe
    enqueues one job per image and dismisses.
 2. `TranscriptionQueue.drain` (serial loop) decodes each image.
 3. `TranscriptionService.transcribePage` — VLM call 1: image → verbatim
@@ -102,7 +104,7 @@ Model export (PyTorch → Core ML + MLX): `model_export/README.md`
 - **State**: Observation framework — `@MainActor @Observable` classes created in
   `FastVLMApp`, injected once with `.environment(...)`, read with
   `@Environment(Type.self)`. Views hold local state in `@State`; shared forms
-  take `@Binding` (see `TranscribeForm`).
+  take `@Binding` (see `PageReviewView`).
 - **Concurrency**: service methods are `async throws`; the queue is serial by
   design (single `drainTask`). Each pass creates its own `LanguageModelSession`
   — no shared session state, so parallel generation wouldn't race. MLX

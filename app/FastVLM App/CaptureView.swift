@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct CaptureView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var pageImages: [Data] = []
+    // Closing is the sheet's swipe-down grabber (RootView presents it visible).
+    @State private var drafts: [PageDraft] = []
     @State private var showCamera = false
 
     // UIImagePickerController needs real camera hardware and the UIKit
@@ -17,7 +17,7 @@ struct CaptureView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            TranscribeForm(pageImages: $pageImages)
+            PageReviewView(drafts: $drafts)
 
             if cameraAvailable {
                 Button {
@@ -28,17 +28,16 @@ struct CaptureView: View {
             }
         }
         .navigationTitle("New Page")
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
-            }
-        }
         // Each confirmed capture APPENDS a page photo, so the user can
         // photograph several pages before transcribing them all at once.
         #if canImport(UIKit)
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { imageData in
-                pageImages.append(imageData)
+                // A failed decode is skipped, same as a failed load in the
+                // import flow.
+                if let draft = PageDraft(originalData: imageData) {
+                    drafts.append(draft)
+                }
             }
         }
         #endif
