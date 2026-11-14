@@ -36,7 +36,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		019A3E0A2D78E6A00055F93B /* FastVLM App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "FastVLM App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		019A3E0A2D78E6A00055F93B /* Journal Saver.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Journal Saver.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		12FFAF3D2DC93583009C4EFA /* get_pretrained_mlx_model.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = get_pretrained_mlx_model.sh; sourceTree = "<group>"; };
 		12FFAF3E2DC93583009C4EFA /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		C35372AE2D08C32D00474D34 /* Video.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Video.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -109,7 +109,7 @@
 			isa = PBXGroup;
 			children = (
 				C35372AE2D08C32D00474D34 /* Video.framework */,
-				019A3E0A2D78E6A00055F93B /* FastVLM App.app */,
+				019A3E0A2D78E6A00055F93B /* Journal Saver.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -154,7 +154,7 @@
 			);
 			name = "FastVLM App";
 			productName = FastVLMCameraExample;
-			productReference = 019A3E0A2D78E6A00055F93B /* FastVLM App.app */;
+			productReference = 019A3E0A2D78E6A00055F93B /* Journal Saver.app */;
 			productType = "com.apple.product-type.application";
 		};
 		C35372AD2D08C32D00474D34 /* Video */ = {
