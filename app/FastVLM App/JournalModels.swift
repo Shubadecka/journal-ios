@@ -41,8 +41,8 @@ class JournalEntry {
     var date: Date  // Date of the entry
     var orderInPage: Int  // Order in the page, 0-indexed
     // True when the date was inferred (not explicitly parsed from the model
-    // output) — these entries get a red border in the list so the user can
-    // review and fix the date whenever they want.
+    // output) — these entries show the Needs Review badge in the list so the
+    // user can review and fix the date whenever they want.
     var needsReview: Bool
     var pages: [JournalPage] = []  // One entry can be in multiple pages
 

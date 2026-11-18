@@ -12,3 +12,4 @@ struct JournalApp: App {
         .environment(transcriptionQueue)
     }
 }
+

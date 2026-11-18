@@ -7,9 +7,12 @@ struct PageDetailView: View {
     let page: JournalPage
     @Environment(TranscriptionQueue.self) private var queue
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.showEntriesForPage) private var showEntriesForPage
     @Environment(\.dismiss) private var dismiss
     @State private var showDelete = false
     @State private var showRetranscribeWarning = false
+    // Tracks whether the page date is being edited in the title slot.
+    @State private var editingDate = false
 
     // A queued/running job for this page disables Re-transcribe — re-running
     // twice would race the in-flight update.
@@ -50,6 +53,38 @@ struct PageDetailView: View {
             .padding()
         }
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                // The page date lives in the title slot: the committed date in
+                // display mode, a compact picker while editing (pencil). The
+                // picker writes straight to the model — this screen has no
+                // draft/save flow.
+                Group {
+                    if editingDate {
+                        @Bindable var page = page
+                        DatePicker("Date", selection: $page.firstEntryDate, displayedComponents: .date)
+                            .labelsHidden()
+                    } else {
+                        HStack(spacing: 8) {
+                            Text(page.firstEntryDate, style: .date)
+                                .font(.headline)
+                            Button {
+                                editingDate.toggle()
+                            } label: {
+                                Label("Edit Date", systemImage: "pencil")
+                                    .labelStyle(.iconOnly)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showEntriesForPage(page)
+                } label: {
+                    Label("View Entries", systemImage: "list.bullet")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button(role: .destructive) {
                     showDelete = true
@@ -83,7 +118,6 @@ struct PageDetailView: View {
         } message: {
             Text("All entries for this page will be deleted and recreated in the process.")
         }
-        .navigationTitle(Text(page.firstEntryDate, style: .date))
         #if os(iOS)
         // Inline keeps the compact bar: the large-title mode reserves a big
         // empty block above the date.

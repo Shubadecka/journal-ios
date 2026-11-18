@@ -7,7 +7,8 @@ struct ParsedEntry {
     var date: Date
     var orderInPage: Int
     // True when the date was inferred (raw date was nil) — the queue saves
-    // this as JournalEntry.needsReview so the entry gets a red border.
+    // this as JournalEntry.needsReview so the entry shows the Needs Review
+    // badge in the list.
     var needsReview: Bool = false
 }
 

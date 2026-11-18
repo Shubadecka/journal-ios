@@ -22,7 +22,9 @@ struct PageView: View {
     @Environment(TranscriptionQueue.self) private var queue
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \JournalPage.createdAt, order: .reverse) private var pages: [JournalPage]
-    @State private var selectedPage: JournalPage?
+    // Navigation stack of the Pages tab: rows push onto it, and the bottom
+    // bar pops it back to this list.
+    @Binding var pagesPath: NavigationPath
     // The page whose trash button was tapped; non-nil shows the dialog.
     @State private var pendingDelete: JournalPage?
 
@@ -32,7 +34,7 @@ struct PageView: View {
                 row(for: page)
             }
         }
-        .navigationDestination(item: $selectedPage) { page in
+        .navigationDestination(for: JournalPage.self) { page in
             PageDetailView(page: page)
         }
         .alert(
@@ -53,6 +55,11 @@ struct PageView: View {
             Text("This permanently deletes this page and all \(page.entries.count) entries associated with it. This cannot be undone.")
         }
         .navigationTitle("Pages")
+        #if os(iOS)
+        // Compact centered bar title: the large-title mode reserves a big
+        // empty block between the bar and the content.
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
     }
 
     @ViewBuilder
@@ -89,7 +96,7 @@ struct PageView: View {
             .disabled(isRunning)
         }
         .contentShape(Rectangle())
-        .onTapGesture { selectedPage = page }
+        .onTapGesture { pagesPath.append(page) }
     }
 
     private func thumbnail(for page: JournalPage) -> some View {
@@ -105,8 +112,7 @@ struct PageView: View {
         }
         .frame(width: 60, height: 80)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        // Red border marks pages whose transcription failed — same technique
-        // as the needsReview rows in EntryListView.
+        // Red border marks pages whose transcription failed.
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(page.transcriptionError != nil ? Color.red : Color.clear,
