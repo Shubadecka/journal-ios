@@ -7,6 +7,17 @@ enum NewPageSheet: Identifiable {
     var id: Self { self }
 }
 
+private struct ShowEntriesForPageKey: EnvironmentKey {
+    static let defaultValue: (JournalPage) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    var showEntriesForPage: (JournalPage) -> Void {
+        get { self[ShowEntriesForPageKey.self] }
+        set { self[ShowEntriesForPageKey.self] = newValue }
+    }
+}
+
 // App shell: pinned transcription banner above the tab content, bottom bar
 // below. One NavigationStack per tab — .searchable and PageDetailView's
 // .navigationDestination each need their own stack.
@@ -21,6 +32,11 @@ struct RootView: View {
     // back to its root screen.
     @State private var entriesPath = NavigationPath()
     @State private var pagesPath = NavigationPath()
+    // Entries-tab page filter: non-nil while the list is drilled in from a
+    // page detail ("View Entries"); cleared by the chip or by leaving the tab.
+    @State private var entriesPageFilter: JournalPage?
+    // Filter request parked while the unsaved-changes alert is up.
+    @State private var pendingFilterPage: JournalPage?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,7 +44,7 @@ struct RootView: View {
             TranscriptionBanner()
             Group {
                 switch selectedTab {
-                case .entries:  NavigationStack(path: $entriesPath) { EntryListView(entriesPath: $entriesPath) }
+                case .entries:  NavigationStack(path: $entriesPath) { EntryListView(entriesPath: $entriesPath, pageFilter: $entriesPageFilter) }
                 case .pages:    NavigationStack(path: $pagesPath) { PageView(pagesPath: $pagesPath) }
                 case .settings: NavigationStack { SettingsView() }
                 }
@@ -48,6 +64,7 @@ struct RootView: View {
             .ignoresSafeArea(.keyboard, edges: .bottom)
         }
         .environment(unsavedGate)
+        .environment(\.showEntriesForPage) { showEntries(for: $0) }
         .sheet(item: $newSheet) { sheet in
             Group {
                 switch sheet {
@@ -62,7 +79,7 @@ struct RootView: View {
             "Unsaved Changes",
             isPresented: Binding(
                 get: { pendingTab != nil },
-                set: { if !$0 { pendingTab = nil } }),
+                set: { if !$0 { pendingTab = nil; pendingFilterPage = nil } }),
             presenting: pendingTab)
         { tab in
             Button("Cancel", role: .cancel) { }
@@ -71,7 +88,12 @@ struct RootView: View {
             // clearing the gate is enough.
             Button("Discard Changes", role: .destructive) {
                 unsavedGate.hasUnsavedChanges = false
-                performGo(tab)
+                if let page = pendingFilterPage {
+                    pendingFilterPage = nil
+                    applyEntriesFilter(page)
+                } else {
+                    performGo(tab)
+                }
             }
         } message: { _ in
             Text("Your changes will be discarded if you leave without saving.")
@@ -96,8 +118,28 @@ struct RootView: View {
             case .settings: break
             }
         } else {
+            // Leaving the Entries tab drops the page filter: it is a drill-in,
+            // not persistent state.
+            if tab != .entries { entriesPageFilter = nil }
             selectedTab = tab
         }
+    }
+
+    // Page detail's "View Entries": jump to the entries list filtered to that
+    // page. It is a tab switch, so it goes through the unsaved-changes gate.
+    private func showEntries(for page: JournalPage) {
+        if unsavedGate.hasUnsavedChanges {
+            pendingTab = .entries
+            pendingFilterPage = page
+        } else {
+            applyEntriesFilter(page)
+        }
+    }
+
+    private func applyEntriesFilter(_ page: JournalPage) {
+        entriesPageFilter = page
+        entriesPath = NavigationPath()
+        selectedTab = .entries
     }
 }
 

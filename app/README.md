@@ -3,14 +3,14 @@ The purpose of this app is to make handling your personal history easy. Take pic
 ## Future Features
 - Entry View
   - attach family photos to journal entries
-  - clickable entries with edit features within the entry view (IN PROGRESS)
-  - 'View Page' button pulling up the page image for easy reference (IN PROGRESS)
+  - clickable entries with edit features within the entry view (DONE)
+  - 'View Page' button pulling up the page image for easy reference (DONE)
   - entry view links to the page view, and vice versa (IN PROGRESS)
   - updated red boxes so the user knows what they mean and they look good (label saying 'needs review'?)
   - Highlight entries with the same date or a date out of order from the rest of the page for review
 - Entries Page
-  - Filter options (so that we can show the page filtered to just entries from one Page)
-  - Better search functionality (better placement, smarter search, filters)
+  - Filter options (so that we can show the page filtered to just entries from one Page) (IN PROGRESS)
+  - Better search functionality (better placement, smarter search, filters) (IN PROGRESS)
 - Transcription Flow
   - improve transcription (sometimes adds \\n and gets the date wrong)
 - Page View

@@ -7,6 +7,7 @@ struct PageDetailView: View {
     let page: JournalPage
     @Environment(TranscriptionQueue.self) private var queue
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.showEntriesForPage) private var showEntriesForPage
     @Environment(\.dismiss) private var dismiss
     @State private var showDelete = false
     @State private var showRetranscribeWarning = false
@@ -75,6 +76,13 @@ struct PageDetailView: View {
                             .buttonStyle(.borderless)
                         }
                     }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showEntriesForPage(page)
+                } label: {
+                    Label("View Entries", systemImage: "list.bullet")
                 }
             }
             ToolbarItem(placement: .primaryAction) {

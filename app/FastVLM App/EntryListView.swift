@@ -10,29 +10,46 @@ struct EntryListView: View {
     // Navigation stack of the Entries tab: rows push onto it, and the bottom
     // bar pops it back to this list.
     @Binding var entriesPath: NavigationPath
+    // Non-nil while the list is drilled in from a page detail ("View
+    // Entries"): shows only that page's entries, with the clear chip above
+    // the search bar.
+    @Binding var pageFilter: JournalPage?
 
     var filteredEntries: [JournalEntry] {
-        if searchText.isEmpty {
-            return entries
+        // Page drill-in filter (from PageDetailView) composes with search text.
+        // Sort matches the @Query's date-reverse ordering.
+        let base = if let pageFilter {
+            pageFilter.entries.sorted { $0.date > $1.date }
         } else {
-            return entries.filter { $0.text.localizedStandardContains(searchText) }
+            entries
         }
+        if searchText.isEmpty { return base }
+        return base.filter { $0.text.localizedStandardContains(searchText) }
+    }
+
+    // Small dismiss affordance shown above the search bar while the list is
+    // filtered to one page's entries.
+    private var clearFilterChip: some View {
+        Button {
+            pageFilter = nil
+        } label: {
+            Label("Clear Filter", systemImage: "xmark.circle.fill")
+                .font(.footnote.weight(.semibold))
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
     }
 
     #if os(iOS)
-    // Search header visibility: hidden once the list scrolls down, restored
-    // by ANY upward scroll. Suppressed while the field is focused or a query
-    // is active, so scrolling never hides an in-progress search.
-    @State private var searchVisible = true
+    // True while the search field has the keyboard; the checkmark in the
+    // accessory bar above the keyboard writes false to dismiss it.
     @FocusState private var searchFocused: Bool
-    // The List's top inset settles right after each appear with upward offset
-    // steps that look like downward scrolls; hides stay suppressed until it
-    // settles (~1s).
-    @State private var scrollSettled = false
 
-    // The list-integrated search header. Replaces .searchable's field, whose
-    // nav-bar drawer hides on downward scroll but doesn't re-reveal until the
-    // list is back at the top.
+    // The list-integrated search header, pinned above the list at all times
+    // (no hide-on-scroll: the show/hide toggling was buggy, and a search
+    // field that never vanishes needs no scroll bookkeeping). Replaces
+    // .searchable's field, whose nav-bar drawer hides on downward scroll but
+    // doesn't re-reveal until the list is back at the top.
     private var searchHeader: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
@@ -53,29 +70,11 @@ struct EntryListView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+        .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal)
         .padding(.vertical, 8)
     }
 
-    private var searchHeaderInset: some View {
-        VStack(spacing: 0) {
-            if searchVisible {
-                searchHeader
-                    .transition(.opacity)
-            }
-        }
-        .animation(.snappy(duration: 0.25), value: searchVisible)
-    }
-
-    private func updateSearchVisibility(newValue: CGFloat, oldValue: CGFloat) {
-        guard abs(newValue - oldValue) > 1 else { return }
-        if newValue < oldValue {
-            searchVisible = true
-        } else if scrollSettled, !searchFocused, searchText.isEmpty {
-            searchVisible = false
-        }
-    }
     #endif
 
     var body: some View {
@@ -124,24 +123,40 @@ struct EntryListView: View {
             }
         }
         #if os(iOS)
-        // Raw contentOffset: SwiftUI does not compensate it when a
-        // safeAreaInset resizes, so header show/hide never feeds back into
-        // this logic — only real content scrolls reach it.
-        .onScrollGeometryChange(for: CGFloat.self) { geo in
-            geo.contentOffset.y
-        } action: { oldValue, newValue in
-            updateSearchVisibility(newValue: newValue, oldValue: oldValue)
-        }
         .safeAreaInset(edge: .top, spacing: 0) {
-            searchHeaderInset
+            VStack(spacing: 8) {
+                if pageFilter != nil {
+                    clearFilterChip
+                        .padding(.top, 8)
+                }
+                searchHeader
+            }
         }
-        .task {
-            scrollSettled = false
-            try? await Task.sleep(for: .seconds(1))
-            scrollSettled = true
+        // Blue checkmark inside the system accessory bar above the keyboard
+        // (the strip the keyboard reserves for input accessories — the "black
+        // bar"): tapping it dismisses the keyboard. ToolbarItemGroup with
+        // .keyboard placement is the API that renders INTO that strip; a
+        // bottom safeAreaInset can only sit above it.
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button {
+                    searchFocused = false
+                } label: {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.blue)
+                }
+            }
         }
         #else
         .searchable(text: $searchText)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if pageFilter != nil {
+                clearFilterChip
+                    .padding(.vertical, 8)
+            }
+        }
         #endif
         .navigationDestination(for: JournalEntry.self) { entry in
             EntryDetailView(entry: entry, entriesPath: $entriesPath)
